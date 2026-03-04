@@ -18,10 +18,16 @@ classifiers = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "datasets>=4.6.0",
     "fastapi==0.115.6",
+    "huggingface-hub>=1.4.1",
+    "pandas>=3.0.1",
+    "pyarrow>=23.0.1",
+    "python-dotenv>=1.2.2",
     "torch==2.6.0",
     "typer==0.15.1",
     "uvicorn==0.34.0",
+    "vectorbt>=0.28.2",
 ]
 
 [dependency-groups]

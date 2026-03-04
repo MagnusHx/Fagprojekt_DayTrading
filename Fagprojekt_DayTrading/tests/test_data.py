@@ -1,6 +1,6 @@
 from torch.utils.data import Dataset
 
-from kvant.data import MyDataset
+from kvant.kdata import MyDataset
 
 
 def test_my_dataset():
