@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1980" height="346" viewBox="0 0 1980 346" role="img" aria-label="Focused Module Dependency Graph">
+<defs>
+  <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#334155"/>
+  </marker>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="36" y="40" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#0f172a">Focused Module Dependency Graph</text>
+<path d="M250,158 C265,158 265,158 280,158" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="265" y="150" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">ticker splits</text>
+<path d="M490,158 C505,158 505,108 520,108" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="505" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">fit/transform</text>
+<path d="M490,158 C505,158 505,238 520,238" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="505" y="150" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">labels</text>
+<path d="M490,158 C625,158 625,158 760,158" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="625" y="150" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">artifacts</text>
+<path d="M970,158 C985,158 985,108 1000,108" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="985" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">PreparedExperiment</text>
+<path d="M1210,108 C1225,108 1225,108 1240,108" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1225" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">instantiate</text>
+<path d="M1210,108 C1225,108 1225,238 1240,238" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1225" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">train loop</text>
+<path d="M1210,108 C1345,108 1345,108 1480,108" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1345" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">evaluation</text>
+<path d="M1210,108 C1465,108 1465,238 1720,238" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1465" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">logging</text>
+<path d="M1450,238 C1465,238 1465,108 1480,108" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1465" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">periodic eval</text>
+<path d="M1690,108 C1585,108 1585,238 1480,238" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1585" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">batched inference</text>
+<path d="M1690,108 C1705,108 1705,108 1720,108" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1705" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">aggregate metrics</text>
+<path d="M1690,108 C1705,108 1705,238 1720,238" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1705" y="100" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">emit charts</text>
+<g id="kvant.kdata.hf_minute_data">
+<rect x="40" y="110" width="210" height="96" rx="18" fill="#0f766e" stroke="#0f172a" stroke-width="1.4"/>
+<text x="58" y="138" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">hf_minute_data</text>
+<text x="58" y="162" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Dataset split builder</text>
+</g>
+<g id="kvant.ml_prepare_data.prepare_experiment">
+<rect x="280" y="110" width="210" height="96" rx="18" fill="#2563eb" stroke="#0f172a" stroke-width="1.4"/>
+<text x="298" y="138" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">prepare_experiment</text>
+<text x="298" y="162" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Preparation orchestrator</text>
+</g>
+<g id="kvant.ml_prepare_data.features.feature_engineering">
+<rect x="520" y="60" width="210" height="96" rx="18" fill="#7c3aed" stroke="#0f172a" stroke-width="1.4"/>
+<text x="538" y="88" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">feature_engineering</text>
+<text x="538" y="112" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Feature engineering</text>
+</g>
+<g id="kvant.ml_prepare_data.labelling.tripple_bar">
+<rect x="520" y="190" width="210" height="96" rx="18" fill="#2563eb" stroke="#0f172a" stroke-width="1.4"/>
+<text x="538" y="218" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">tripple_bar</text>
+<text x="538" y="242" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Triple-barrier labeler</text>
+</g>
+<g id="kvant.ml_prepare_data.data_loading">
+<rect x="760" y="110" width="210" height="96" rx="18" fill="#2563eb" stroke="#0f172a" stroke-width="1.4"/>
+<text x="778" y="138" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">data_loading</text>
+<text x="778" y="162" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Prepared dataset loader</text>
+</g>
+<g id="kvant.ml_framework.scripts.train_experiment">
+<rect x="1000" y="60" width="210" height="96" rx="18" fill="#1d4ed8" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1018" y="88" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">train_experiment</text>
+<text x="1018" y="112" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Training CLI</text>
+</g>
+<g id="kvant.ml_framework.models.conv1d">
+<rect x="1240" y="60" width="210" height="96" rx="18" fill="#b45309" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1258" y="88" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">conv1d</text>
+<text x="1258" y="112" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Conv1D model</text>
+</g>
+<g id="kvant.ml_framework.train.trainer">
+<rect x="1240" y="190" width="210" height="96" rx="18" fill="#dc2626" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1258" y="218" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">trainer</text>
+<text x="1258" y="242" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Trainer</text>
+</g>
+<g id="kvant.ml_framework.train.evaluator">
+<rect x="1480" y="60" width="210" height="96" rx="18" fill="#dc2626" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1498" y="88" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">evaluator</text>
+<text x="1498" y="112" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Evaluator</text>
+</g>
+<g id="kvant.ml_framework.train.predict">
+<rect x="1480" y="190" width="210" height="96" rx="18" fill="#dc2626" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1498" y="218" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">predict</text>
+<text x="1498" y="242" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Prediction loop</text>
+</g>
+<g id="kvant.ml_framework.train.metrics">
+<rect x="1720" y="60" width="210" height="96" rx="18" fill="#dc2626" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1738" y="88" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">metrics</text>
+<text x="1738" y="112" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Metric calculators</text>
+</g>
+<g id="kvant.ml_framework.logging.wandb_logger">
+<rect x="1720" y="190" width="210" height="96" rx="18" fill="#15803d" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1738" y="218" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">wandb_logger</text>
+<text x="1738" y="242" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">W&amp;B logger</text>
+</g>
+</svg>

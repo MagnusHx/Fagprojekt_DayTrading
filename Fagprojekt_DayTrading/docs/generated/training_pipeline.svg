@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="288" viewBox="0 0 1600 288" role="img" aria-label="Training Execution Pipeline">
+<defs>
+  <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#334155"/>
+  </marker>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="36" y="40" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#0f172a">Training Execution Pipeline</text>
+<path d="M210,149 C220,149 220,184 230,184" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M400,184 C410,184 410,149 420,149" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M590,149 C600,149 600,184 610,184" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M780,184 C790,184 790,149 800,149" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M970,149 C980,149 980,184 990,184" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M1160,184 C1170,184 1170,149 1180,149" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M1350,149 C1360,149 1360,184 1370,184" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<g id="entry">
+<rect x="40" y="105" width="170" height="88" rx="18" fill="#1d4ed8" stroke="#0f172a" stroke-width="1.4"/>
+<text x="58" y="133" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Entry point</text>
+<text x="58" y="157" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">train_experiment.main</text>
+</g>
+<g id="load">
+<rect x="230" y="140" width="170" height="88" rx="18" fill="#2563eb" stroke="#0f172a" stroke-width="1.4"/>
+<text x="248" y="168" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Load prepared data</text>
+<text x="248" y="192" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">PreparedExperiment.get_loaders</text>
+</g>
+<g id="model">
+<rect x="420" y="105" width="170" height="88" rx="18" fill="#b45309" stroke="#0f172a" stroke-width="1.4"/>
+<text x="438" y="133" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Build model</text>
+<text x="438" y="157" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Conv1DClassifier + AdamW</text>
+</g>
+<g id="weights">
+<rect x="610" y="140" width="170" height="88" rx="18" fill="#7c3aed" stroke="#0f172a" stroke-width="1.4"/>
+<text x="628" y="168" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Compute class weights</text>
+<text x="628" y="192" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">class_weights_from_dataset</text>
+</g>
+<g id="logger">
+<rect x="800" y="105" width="170" height="88" rx="18" fill="#15803d" stroke="#0f172a" stroke-width="1.4"/>
+<text x="818" y="133" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Setup logging</text>
+<text x="818" y="157" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">WandbLogger.setup</text>
+</g>
+<g id="train">
+<rect x="990" y="140" width="170" height="88" rx="18" fill="#dc2626" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1008" y="168" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Train epochs</text>
+<text x="1008" y="192" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Trainer.fit / train_one_epoch</text>
+</g>
+<g id="eval">
+<rect x="1180" y="105" width="170" height="88" rx="18" fill="#0f766e" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1198" y="133" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Evaluate</text>
+<text x="1198" y="157" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">ExperimentEvaluator.evaluate_a</text>
+<text x="1198" y="173" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">ll</text>
+</g>
+<g id="done">
+<rect x="1370" y="140" width="170" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1388" y="168" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Persist results</text>
+<text x="1388" y="192" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">best checkpoint + wandb stop</text>
+</g>
+</svg>

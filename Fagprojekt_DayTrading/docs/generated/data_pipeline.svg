@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="288" viewBox="0 0 1600 288" role="img" aria-label="Data Preparation Pipeline">
+<defs>
+  <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#334155"/>
+  </marker>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="36" y="40" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#0f172a">Data Preparation Pipeline</text>
+<path d="M210,184 C220,184 220,149 230,149" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M400,149 C410,149 410,184 420,184" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M590,184 C600,184 600,149 610,149" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M780,149 C790,149 790,184 800,184" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M970,184 C980,184 980,149 990,149" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M1160,149 C1170,149 1170,184 1180,184" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M1350,184 C1360,184 1360,149 1370,149" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<g id="entry">
+<rect x="40" y="140" width="170" height="88" rx="18" fill="#1d4ed8" stroke="#0f172a" stroke-width="1.4"/>
+<text x="58" y="168" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Entry point</text>
+<text x="58" y="192" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">prepare_experiment.main</text>
+</g>
+<g id="download">
+<rect x="230" y="105" width="170" height="88" rx="18" fill="#0f766e" stroke="#0f172a" stroke-width="1.4"/>
+<text x="248" y="133" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Resolve dataset split</text>
+<text x="248" y="157" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">get_huggingface_top_20_normal_</text>
+<text x="248" y="173" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">splits</text>
+</g>
+<g id="load">
+<rect x="420" y="140" width="170" height="88" rx="18" fill="#2563eb" stroke="#0f172a" stroke-width="1.4"/>
+<text x="438" y="168" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Load ticker data</text>
+<text x="438" y="192" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">get_ticker_data</text>
+</g>
+<g id="sample">
+<rect x="610" y="105" width="170" height="88" rx="18" fill="#7c3aed" stroke="#0f172a" stroke-width="1.4"/>
+<text x="628" y="133" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Fit and sample bars</text>
+<text x="628" y="157" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">TunedCUSUMBarSampler.fit/trans</text>
+<text x="628" y="173" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">form</text>
+</g>
+<g id="features">
+<rect x="800" y="140" width="170" height="88" rx="18" fill="#4338ca" stroke="#0f172a" stroke-width="1.4"/>
+<text x="818" y="168" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Engineer features</text>
+<text x="818" y="192" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">IntradayTA10Features /</text>
+<text x="818" y="208" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">StandardizedFeatures</text>
+</g>
+<g id="label">
+<rect x="990" y="105" width="170" height="88" rx="18" fill="#b45309" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1008" y="133" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Apply labels</text>
+<text x="1008" y="157" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">TripleBarrierLabeler.transform</text>
+</g>
+<g id="store">
+<rect x="1180" y="140" width="170" height="88" rx="18" fill="#dc2626" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1198" y="168" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Write prepared artifacts</text>
+<text x="1198" y="192" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">save_ticker_artifacts +</text>
+<text x="1198" y="208" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">indices</text>
+</g>
+<g id="report">
+<rect x="1370" y="105" width="170" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1388" y="133" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Report + bookmark</text>
+<text x="1388" y="157" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">report_sampling_density +</text>
+<text x="1388" y="173" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">last_experiment.txt</text>
+</g>
+</svg>

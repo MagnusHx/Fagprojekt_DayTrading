@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="300" viewBox="0 0 1500 300" role="img" aria-label="Layered Architecture Overview">
+<defs>
+  <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#334155"/>
+  </marker>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="36" y="40" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#0f172a">Layered Architecture Overview</text>
+<path d="M220,145 C232,145 232,185 245,185" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="232" y="137" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">raw data</text>
+<path d="M220,145 C335,145 335,145 450,145" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="335" y="137" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">prepare</text>
+<path d="M425,185 C437,185 437,145 450,145" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="437" y="137" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">OHLCV frames</text>
+<path d="M630,145 C642,145 642,185 655,185" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="642" y="137" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">sampled bars</text>
+<path d="M835,185 C950,185 950,185 1065,185" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="950" y="177" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">prepared tensors</text>
+<path d="M1245,185 C1052,185 1052,145 860,145" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1052" y="137" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">forward pass</text>
+<path d="M1245,185 C1257,185 1257,145 1270,145" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1257" y="137" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">metrics</text>
+<g id="entry">
+<rect x="40" y="90" width="180" height="110" rx="18" fill="#1d4ed8" stroke="#0f172a" stroke-width="1.4"/>
+<text x="58" y="118" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Entry / Orchestration</text>
+<text x="58" y="142" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">tasks.py, ml_framework/scripts</text>
+<text x="58" y="158" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">/train_experiment.py...</text>
+</g>
+<g id="data_ingestion">
+<rect x="245" y="130" width="180" height="110" rx="18" fill="#0f766e" stroke="#0f172a" stroke-width="1.4"/>
+<text x="263" y="158" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Data Ingestion</text>
+<text x="263" y="182" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">kdata/hf_minute_data.py,</text>
+<text x="263" y="198" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">kdata/hf_download_utils.py...</text>
+</g>
+<g id="data_preparation">
+<rect x="450" y="90" width="180" height="110" rx="18" fill="#2563eb" stroke="#0f172a" stroke-width="1.4"/>
+<text x="468" y="118" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Data Preparation</text>
+<text x="468" y="142" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">ml_prepare_data/samplers/*, ml</text>
+<text x="468" y="158" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">_prepare_data/labelling/trippl</text>
+<text x="468" y="174" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">e_bar.py...</text>
+</g>
+<g id="feature_engineering">
+<rect x="655" y="130" width="180" height="110" rx="18" fill="#7c3aed" stroke="#0f172a" stroke-width="1.4"/>
+<text x="673" y="158" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Feature Engineering</text>
+<text x="673" y="182" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">ml_prepare_data/features/featu</text>
+<text x="673" y="198" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">re_engineering.py</text>
+</g>
+<g id="ml_models">
+<rect x="860" y="90" width="180" height="110" rx="18" fill="#b45309" stroke="#0f172a" stroke-width="1.4"/>
+<text x="878" y="118" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">ML Models</text>
+<text x="878" y="142" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">ml_framework/models/conv1d.py</text>
+</g>
+<g id="training_evaluation">
+<rect x="1065" y="130" width="180" height="110" rx="18" fill="#dc2626" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1083" y="158" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Training / Evaluation</text>
+<text x="1083" y="182" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">ml_framework/train/*</text>
+</g>
+<g id="logging">
+<rect x="1270" y="90" width="180" height="110" rx="18" fill="#15803d" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1288" y="118" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Logging / Monitoring</text>
+<text x="1288" y="142" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">ml_framework/logging/wandb_log</text>
+<text x="1288" y="158" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">ger.py</text>
+</g>
+</svg>

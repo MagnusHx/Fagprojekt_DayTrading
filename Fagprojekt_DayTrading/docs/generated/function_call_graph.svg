@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2250" height="278" viewBox="0 0 2250 278" role="img" aria-label="Focused Training Function Call Graph">
+<defs>
+  <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="#334155"/>
+  </marker>
+</defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="36" y="40" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#0f172a">Focused Training Function Call Graph</text>
+<path d="M230,134 C245,134 245,134 260,134" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M230,134 C355,134 355,134 480,134" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M230,134 C465,134 465,134 700,134" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M230,134 C575,134 575,94 920,94" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M1110,94 C1125,94 1125,54 1140,54" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1125" y="46" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">every epoch</text>
+<path d="M1110,94 C1125,94 1125,174 1140,174" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1125" y="86" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">light eval</text>
+<path d="M1110,94 C1235,94 1235,94 1360,94" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1235" y="86" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">full eval</text>
+<path d="M1550,94 C1565,94 1565,94 1580,94" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<text x="1565" y="86" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#334155">for each split</text>
+<path d="M1770,94 C1785,94 1785,54 1800,54" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M1770,94 C1785,94 1785,174 1800,174" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<path d="M1770,94 C1895,94 1895,114 2020,114" fill="none" stroke="#334155" stroke-width="2.2" marker-end="url(#arrowhead)"/>
+<g id="main">
+<rect x="40" y="90" width="190" height="88" rx="18" fill="#1e293b" stroke="#0f172a" stroke-width="1.4"/>
+<text x="58" y="118" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">train_experiment.main</text>
+<text x="58" y="142" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Orchestrates training</text>
+</g>
+<g id="args">
+<rect x="260" y="90" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="278" y="118" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">parse_args</text>
+<text x="278" y="142" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Resolve experiment directory</text>
+</g>
+<g id="loaders">
+<rect x="480" y="90" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="498" y="118" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">PreparedExperiment.get_loaders</text>
+<text x="498" y="142" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Build train/val/test</text>
+<text x="498" y="158" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">DataLoaders</text>
+</g>
+<g id="setup">
+<rect x="700" y="90" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="718" y="118" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">WandbLogger.setup</text>
+<text x="718" y="142" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Register dataset metadata</text>
+</g>
+<g id="fit">
+<rect x="920" y="50" width="190" height="88" rx="18" fill="#1e293b" stroke="#0f172a" stroke-width="1.4"/>
+<text x="938" y="78" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Trainer.fit</text>
+<text x="938" y="102" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Epoch loop and checkpointing</text>
+</g>
+<g id="epoch">
+<rect x="1140" y="10" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1158" y="38" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Trainer.train_one_epoch</text>
+<text x="1158" y="62" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Forward/backward pass</text>
+</g>
+<g id="acc">
+<rect x="1140" y="130" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1158" y="158" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Trainer.accuracy_only</text>
+<text x="1158" y="182" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Light validation check</text>
+</g>
+<g id="eval">
+<rect x="1360" y="50" width="190" height="88" rx="18" fill="#1e293b" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1378" y="78" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">ExperimentEvaluator.evaluate_all</text>
+<text x="1378" y="102" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Split-wide evaluation</text>
+</g>
+<g id="split">
+<rect x="1580" y="50" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1598" y="78" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">ExperimentEvaluator.evaluate_split</text>
+<text x="1598" y="102" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Per-split metrics</text>
+</g>
+<g id="pred">
+<rect x="1800" y="10" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1818" y="38" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">predict</text>
+<text x="1818" y="62" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Inference loop</text>
+</g>
+<g id="metrics">
+<rect x="1800" y="130" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="1818" y="158" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">classification_metrics</text>
+<text x="1818" y="182" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Accuracy summary</text>
+</g>
+<g id="profit">
+<rect x="2020" y="70" width="190" height="88" rx="18" fill="#475569" stroke="#0f172a" stroke-width="1.4"/>
+<text x="2038" y="98" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#ffffff">compute_action_profit_stats</text>
+<text x="2038" y="122" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#e2e8f0">Per-action profit stats</text>
+</g>
+</svg>

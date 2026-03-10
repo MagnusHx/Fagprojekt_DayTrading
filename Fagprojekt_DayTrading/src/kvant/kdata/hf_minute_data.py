@@ -1,6 +1,6 @@
 
 # from historical_stuff.data_vectorbt_example import MONTH_FILE
-from src.kvant.kdata.hf_download_utils import load_one_month
+from kvant.kdata.hf_download_utils import load_one_month
 import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -230,7 +230,7 @@ def download_and_create_dataset(dataset_configurations : list[DatasetConfigurati
 
 
 def get_huggingface_top_200_splits():
-    from src import kvant
+    import kvant
     cache_dir = os.path.abspath(kvant.__path__[0] + "/../../cache/top_200")
     downloaded_datasets = download_and_create_dataset(available_datasets(), use_top_n_tickers=200, cache_dir=cache_dir)
     print("-"*80)
@@ -262,7 +262,7 @@ def _tuple_to_code(tup):
 # Example:
 
 def get_huggingface_top_n_tiny_splits(n=4, warmup_quarters=1, blacklisted_tickers=None):
-    from src import kvant
+    import kvant
     if blacklisted_tickers is None:
         blacklisted_tickers = ("SPY", "QQQ", "SQQQ", "TQQQ", "LQD", "HYG", "FB", "TLT", "LQD")
 
@@ -285,7 +285,7 @@ def get_huggingface_top_n_tiny_splits(n=4, warmup_quarters=1, blacklisted_ticker
 
 
 # def get_huggingface_top_n_normal_splits(n=4, warmup_quarters=4):
-#     from src import kvant
+#     import kvant
 #     cache_dir = os.path.abspath(f"{kvant.__path__[0]}/../../cache/top_{n}_warm_{warmup_quarters}_tiny")
 #     downloaded_datasets = download_and_create_dataset(available_datasets(first_year=2020, warmup_quarters=warmup_quarters), use_top_n_tickers=n, cache_dir=cache_dir)
 #     print("-" * 80)
@@ -373,7 +373,7 @@ if __name__ == "__main__":
 
     df = ticker_data_train[ticker]
     # df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    from src.kvant.labelling import tripple_bar_label
+    from kvant.labelling import tripple_bar_label
     # for kk, t in enumerate(df.index):
     #     a, b = tripple_bar_label(df,  time_start=t, width=32, height=0.025)
     #     print(t, a,b)

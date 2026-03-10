@@ -1,0 +1,2079 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 2467 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(Architecture Documentation) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(System Overview) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The repository is organized around a two-stage quant research workflow: a data preparation) Tj
+0 -14 Td
+(pipeline under kvant.ml_prepare_data and a model training/evaluation pipeline under) Tj
+0 -14 Td
+(kvant.ml_framework. Raw minute OHLCV data is sourced from Hugging Face dataset shards,) Tj
+0 -14 Td
+(transformed into prepared experiment artifacts on disk, then consumed by a PyTorch training) Tj
+0 -14 Td
+(loop with W&B-based reporting.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Repository Structure) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(``text) Tj
+0 -14 Td
+(Fagprojekt_DayTrading/) Tj
+0 -14 Td
+(├── .devcontainer/) Tj
+0 -14 Td
+(│   ├── devcontainer.json) Tj
+0 -14 Td
+(│   └── post_create.sh) Tj
+0 -14 Td
+(├── .github/) Tj
+0 -14 Td
+(│   ├── agents/) Tj
+0 -14 Td
+(│   │   └── dtu_mlops_agent.md) Tj
+0 -14 Td
+(│   ├── prompts/) Tj
+0 -14 Td
+(│   │   └── add_test.prompt.md) Tj
+0 -14 Td
+(│   ├── workflows/) Tj
+0 -14 Td
+(│   │   ├── linting.yaml) Tj
+0 -14 Td
+(│   │   └── tests.yaml) Tj
+0 -14 Td
+(│   └── dependabot.yaml) Tj
+0 -14 Td
+(├── configs/) Tj
+0 -14 Td
+(│   └── .gitkeep) Tj
+0 -14 Td
+(├── dockerfiles/) Tj
+0 -14 Td
+(│   ├── api.dockerfile) Tj
+0 -14 Td
+(│   └── train.dockerfile) Tj
+0 -14 Td
+(├── docs/) Tj
+0 -14 Td
+(│   ├── generated/) Tj
+0 -14 Td
+(│   │   ├── architecture_documentation.md) Tj
+0 -14 Td
+(│   │   ├── architecture_documentation.pdf) Tj
+0 -14 Td
+(│   │   ├── architecture_overview.svg) Tj
+0 -14 Td
+(│   │   ├── data_pipeline.svg) Tj
+0 -14 Td
+(│   │   ├── function_call_graph.svg) Tj
+0 -14 Td
+(│   │   ├── module_dependency_graph.svg) Tj
+0 -14 Td
+(│   │   └── training_pipeline.svg) Tj
+0 -14 Td
+(│   ├── source/) Tj
+0 -14 Td
+(│   │   └── index.md) Tj
+0 -14 Td
+(│   ├── generate_architecture_docs.py) Tj
+0 -14 Td
+(│   ├── mkdocs.yaml) Tj
+0 -14 Td
+(│   └── README.md) Tj
+0 -14 Td
+(├── models/) Tj
+0 -14 Td
+(│   └── .gitkeep) Tj
+0 -14 Td
+(├── notebooks/) Tj
+0 -14 Td
+(│   └── .gitkeep) Tj
+0 -14 Td
+(├── reports/) Tj
+0 -14 Td
+(│   ├── figures/) Tj
+0 -14 Td
+(│   │   └── .gitkeep) Tj
+0 -14 Td
+(│   └── .gitkeep) Tj
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+4 0 obj
+<< /Length 2605 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(├── src/) Tj
+0 -14 Td
+(│   └── kvant/) Tj
+0 -14 Td
+(│       ├── kdata/) Tj
+0 -14 Td
+(│       │   ├── __init__.py) Tj
+0 -14 Td
+(│       │   ├── data_vectorbt_example.py) Tj
+0 -14 Td
+(│       │   ├── hf_download_utils.py) Tj
+0 -14 Td
+(│       │   └── hf_minute_data.py) Tj
+0 -14 Td
+(│       ├── kmarket_info/) Tj
+0 -14 Td
+(│       │   ├── __init__.py) Tj
+0 -14 Td
+(│       │   └── is_nyse_open.py) Tj
+0 -14 Td
+(│       ├── ml_framework/) Tj
+0 -14 Td
+(│       │   ├── logging/) Tj
+0 -14 Td
+(│       │   ├── models/) Tj
+0 -14 Td
+(│       │   ├── scripts/) Tj
+0 -14 Td
+(│       │   ├── train/) Tj
+0 -14 Td
+(│       │   └── __init__.py) Tj
+0 -14 Td
+(│       ├── ml_prepare_data/) Tj
+0 -14 Td
+(│       │   ├── features/) Tj
+0 -14 Td
+(│       │   ├── labelling/) Tj
+0 -14 Td
+(│       │   ├── plot_labelling/) Tj
+0 -14 Td
+(│       │   ├── samplers/) Tj
+0 -14 Td
+(│       │   ├── __init__.py) Tj
+0 -14 Td
+(│       │   ├── data_loading.py) Tj
+0 -14 Td
+(│       │   ├── data_loading_utils.py) Tj
+0 -14 Td
+(│       │   ├── dataset_preparation_utils.py) Tj
+0 -14 Td
+(│       │   ├── prepare_experiment.py) Tj
+0 -14 Td
+(│       │   └── reporting.py) Tj
+0 -14 Td
+(│       ├── __init__.py) Tj
+0 -14 Td
+(│       └── labelling.py) Tj
+0 -14 Td
+(├── tests/) Tj
+0 -14 Td
+(│   ├── __init__.py) Tj
+0 -14 Td
+(│   ├── test_api.py) Tj
+0 -14 Td
+(│   ├── test_data.py) Tj
+0 -14 Td
+(│   └── test_model.py) Tj
+0 -14 Td
+(├── .gitignore) Tj
+0 -14 Td
+(├── .pre-commit-config.yaml) Tj
+0 -14 Td
+(├── .python-version) Tj
+0 -14 Td
+(├── AGENTS.md) Tj
+0 -14 Td
+(├── LICENSE) Tj
+0 -14 Td
+(├── pyproject.toml) Tj
+0 -14 Td
+(├── README.md) Tj
+0 -14 Td
+(├── tasks.py) Tj
+0 -14 Td
+(└── uv.lock) Tj
+0 -14 Td
+(`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Entry Points) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- kvant.kdata.data_vectorbt_example: src/kvant/kdata/data_vectorbt_example.py \(__main__\)) Tj
+0 -14 Td
+(- kvant.kdata.hf_minute_data: src/kvant/kdata/hf_minute_data.py \(__main__\)) Tj
+0 -14 Td
+(- kvant.ml_framework.scripts.train_experiment:) Tj
+0 -14 Td
+(src/kvant/ml_framework/scripts/train_experiment.py \(__main__\)) Tj
+0 -14 Td
+(- kvant.ml_framework.scripts.train_experiment: Training CLI) Tj
+0 -14 Td
+(- kvant.ml_prepare_data.plot_labelling.vary_labeller_runs:) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 2641 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(src/kvant/ml_prepare_data/plot_labelling/vary_labeller_runs.py \(__main__\)) Tj
+0 -14 Td
+(- kvant.ml_prepare_data.plot_labelling.vary_labeller_runs: Labelling sweep CLI) Tj
+0 -14 Td
+(- kvant.ml_prepare_data.plot_labelling.vary_labeller_runs_plot:) Tj
+0 -14 Td
+(src/kvant/ml_prepare_data/plot_labelling/vary_labeller_runs_plot.py \(__main__\)) Tj
+0 -14 Td
+(- kvant.ml_prepare_data.prepare_experiment: src/kvant/ml_prepare_data/prepare_experiment.py) Tj
+0 -14 Td
+(\(__main__\)) Tj
+0 -14 Td
+(- kvant.ml_prepare_data.prepare_experiment: Data preparation CLI) Tj
+0 -14 Td
+(- tasks: Invoke tasks) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Architecture Layers) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Entry / Orchestration) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.ml_framework.scripts.__init__, kvant.ml_framework.scripts.train_experiment, tasks) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Data Ingestion) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.kdata.__init__, kvant.kdata.data_vectorbt_example, kvant.kdata.hf_download_utils,) Tj
+0 -14 Td
+(kvant.kdata.hf_minute_data) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Market Calendar) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.kmarket_info.__init__, kvant.kmarket_info.is_nyse_open) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Data Preparation) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.labelling, kvant.ml_prepare_data.__init__, kvant.ml_prepare_data.data_loading,) Tj
+0 -14 Td
+(kvant.ml_prepare_data.data_loading_utils, kvant.ml_prepare_data.dataset_preparation_utils,) Tj
+0 -14 Td
+(kvant.ml_prepare_data.labelling.__init__, kvant.ml_prepare_data.labelling.tripple_bar,) Tj
+0 -14 Td
+(kvant.ml_prepare_data.prepare_experiment, kvant.ml_prepare_data.reporting,) Tj
+0 -14 Td
+(kvant.ml_prepare_data.samplers.__init__, kvant.ml_prepare_data.samplers.sampler_cumsum,) Tj
+0 -14 Td
+(kvant.ml_prepare_data.samplers.sampling) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Feature Engineering) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.ml_prepare_data.features.__init__, kvant.ml_prepare_data.features.feature_engineering) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(ML Models) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.ml_framework.models.__init__, kvant.ml_framework.models.conv1d) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Training / Evaluation) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.ml_framework.__init__, kvant.ml_framework.train.__init__,) Tj
+0 -14 Td
+(kvant.ml_framework.train.evaluator, kvant.ml_framework.train.metrics,) Tj
+0 -14 Td
+(kvant.ml_framework.train.predict, kvant.ml_framework.train.trainer,) Tj
+0 -14 Td
+(kvant.ml_framework.train.utils) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Logging / Monitoring) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.ml_framework.logging.__init__, kvant.ml_framework.logging.wandb_logger) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 2411 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+() Tj
+0 -14 Td
+(Analysis Utilities) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.ml_prepare_data.plot_labelling.vary_labeller_runs,) Tj
+0 -14 Td
+(kvant.ml_prepare_data.plot_labelling.vary_labeller_runs_plot) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Core Package) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(kvant.__init__) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Dependency Graph) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(This graph is intentionally focused on the modules that shape the end-to-end training) Tj
+0 -14 Td
+(workflow. It omits package marker files and low-signal helper modules to keep the node count) Tj
+0 -14 Td
+(readable.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Execution Pipelines) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Data Preparation Pipeline) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Training Pipeline) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Pipeline Trace) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- Data entry: src/kvant/ml_prepare_data/prepare_experiment.py:main\(\) discovers a dataset) Tj
+0 -14 Td
+(split and loads per-ticker OHLCV frames.) Tj
+0 -14 Td
+(- Sampling: TunedCUSUMBarSampler.fit/transform\(\) reduces dense minute data to event bars.) Tj
+0 -14 Td
+(- Features: IntradayTA10Features and StandardizedFeatures convert bars into model-ready) Tj
+0 -14 Td
+(features.) Tj
+0 -14 Td
+(- Labels: TripleBarrierLabeler.transform\(\) assigns targets and metadata for downstream) Tj
+0 -14 Td
+(profit analysis.) Tj
+0 -14 Td
+(- Prepared artifacts: prepare_experiment\(\) writes ticker arrays plus split indices into) Tj
+0 -14 Td
+(src/kvant/ml_framework/prepared/.) Tj
+0 -14 Td
+(- Training entry: src/kvant/ml_framework/scripts/train_experiment.py:main\(\) reads the latest) Tj
+0 -14 Td
+(prepared experiment.) Tj
+0 -14 Td
+(- Training loop: Trainer.fit\(\) trains Conv1DClassifier, checkpoints by validation accuracy,) Tj
+0 -14 Td
+(and triggers periodic evaluation.) Tj
+0 -14 Td
+(- Evaluation and logging: ExperimentEvaluator computes metrics and WandbLogger publishes) Tj
+0 -14 Td
+(split and ticker-level diagnostics.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Function Call Graph) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(This is a focused call graph centered on the training entrypoint and the evaluation stack.) Tj
+0 -14 Td
+(Static tools were used to inspect the repository, but the final visualization is reduced to) Tj
+0 -14 Td
+(the cross-module calls that matter operationally.) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 1711 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+() Tj
+0 -14 Td
+(File-by-File Documentation) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: os) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/kdata/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.kdata.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/kdata/data_vectorbt_example.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Implements the data vectorbt example module in the Data Ingestion layer.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- run_ma_crossover\(close: pd.Series\) -> vbt.Portfolio) Tj
+0 -14 Td
+(- main\(\)) Tj
+0 -14 Td
+(- External dependencies: pandas, vectorbt) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- run_ma_crossover: vbt.Portfolio) Tj
+0 -14 Td
+(- main: untyped return) Tj
+0 -14 Td
+(- Side effects: filesystem reads, stdout logging) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- run_ma_crossover\(close: pd.Series\) -> vbt.Portfolio) Tj
+0 -14 Td
+(- main\(\)) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/kdata/hf_download_utils.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 10 0 R >>
+endobj
+12 0 obj
+<< /Length 2255 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(Loads monthly dataset shards from Hugging Face into pandas DataFrames.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- load_one_month\(month_file: str\) -> pd.DataFrame) Tj
+0 -14 Td
+(- External dependencies: pandas) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- load_one_month: pd.DataFrame) Tj
+0 -14 Td
+(- Side effects: filesystem reads, network / remote data, stdout logging) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- load_one_month\(month_file: str\) -> pd.DataFrame) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/kdata/hf_minute_data.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Downloads, filters, and organizes minute-level OHLCV dataset splits from Hugging Face.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- get_dataset_file\(repo_id: str, filename: str\) -> str) Tj
+0 -14 Td
+(- get_raw_monthly_data\(year, month_zero_indexed\)) Tj
+0 -14 Td
+(- prepare_single_ticker\(month_file: str, ticker: str, impute_missing_minutes = True\) ->) Tj
+0 -14 Td
+(dict[str, pd.DataFrame]) Tj
+0 -14 Td
+(- External dependencies: hashlib, os, pandas, pyarrow, tqdm) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- get_dataset_file: str) Tj
+0 -14 Td
+(- get_raw_monthly_data: untyped return) Tj
+0 -14 Td
+(- prepare_single_ticker: dict[str, pd.DataFrame]) Tj
+0 -14 Td
+(- Side effects: filesystem reads, filesystem writes, network / remote data, stdout logging,) Tj
+0 -14 Td
+(visual reporting) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- get_dataset_file\(repo_id: str, filename: str\) -> str) Tj
+0 -14 Td
+(- get_raw_monthly_data\(year, month_zero_indexed\)) Tj
+0 -14 Td
+(- prepare_single_ticker\(month_file: str, ticker: str, impute_missing_minutes = True\) ->) Tj
+0 -14 Td
+(dict[str, pd.DataFrame]) Tj
+0 -14 Td
+(- google_1_month\(\)) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/kmarket_info/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.kmarket_info.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 12 0 R >>
+endobj
+14 0 obj
+<< /Length 2308 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(File: src/kvant/kmarket_info/is_nyse_open.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Checks whether timestamps fall inside the NYSE trading window.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- nyse_trade_window_is_valid\(entry_ts_utc: pd.Timestamp, exit_ts_utc: pd.Timestamp\) -> bool) Tj
+0 -14 Td
+(- is_nyse_available\(dt, minutes_after_open: int = 10, minutes_before_close: int = 10\) ->) Tj
+0 -14 Td
+(bool) Tj
+0 -14 Td
+(- External dependencies: pandas, pandas_market_calendars) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- nyse_trade_window_is_valid: bool) Tj
+0 -14 Td
+(- is_nyse_available: bool) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- nyse_trade_window_is_valid\(entry_ts_utc: pd.Timestamp, exit_ts_utc: pd.Timestamp\) -> bool) Tj
+0 -14 Td
+(- is_nyse_available\(dt, minutes_after_open: int = 10, minutes_before_close: int = 10\) ->) Tj
+0 -14 Td
+(bool) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/labelling.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Provides the low-level triple-barrier labeling routine used by the labeler.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- _to_utc_ts\(x: Union[pd.Timestamp, str]\) -> pd.Timestamp) Tj
+0 -14 Td
+(- tripple_bar_label\(data: pd.DataFrame, time_start: Union[pd.Timestamp, str], width: int,) Tj
+0 -14 Td
+(height: float\) -> Optional[TripleBarLabel]) Tj
+0 -14 Td
+(- External dependencies: dataclasses, numpy, pandas) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- _to_utc_ts: pd.Timestamp) Tj
+0 -14 Td
+(- tripple_bar_label: Optional[TripleBarLabel]) Tj
+0 -14 Td
+(- Side effects: filesystem reads) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- _to_utc_ts\(x: Union[pd.Timestamp, str]\) -> pd.Timestamp) Tj
+0 -14 Td
+(- tripple_bar_label\(data: pd.DataFrame, time_start: Union[pd.Timestamp, str], width: int,) Tj
+0 -14 Td
+(height: float\) -> Optional[TripleBarLabel]) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_framework.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Side effects: model training) Tj
+0 -14 Td
+() Tj
+ET
+endstream
+endobj
+15 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 14 0 R >>
+endobj
+16 0 obj
+<< /Length 2202 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/logging/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_framework.logging.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/logging/wandb_logger.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Sends training metrics, confusion charts, and per-ticker summaries to Weights & Biases.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- _safe_int\(x: Any, default: int = 0\) -> int) Tj
+0 -14 Td
+(- _to_float_or_nan\(x: Any\) -> float) Tj
+0 -14 Td
+(- _plot_confusion_heatmap\(cm: np.ndarray, title: str\) -> plt.Figure) Tj
+0 -14 Td
+(- WandbLogger.__init__\(self, *, project: str, name: Optional[str] = None, config:) Tj
+0 -14 Td
+(Optional[Dict[str, Any]] = None, init_kwargs\)) Tj
+0 -14 Td
+(- External dependencies: matplotlib, numpy, wandb) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- _safe_int: int) Tj
+0 -14 Td
+(- _to_float_or_nan: float) Tj
+0 -14 Td
+(- _plot_confusion_heatmap: plt.Figure) Tj
+0 -14 Td
+(- Side effects: network / remote data, visual reporting) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions**) Tj
+0 -14 Td
+(- _safe_int\(x: Any, default: int = 0\) -> int) Tj
+0 -14 Td
+(- _to_float_or_nan\(x: Any\) -> float) Tj
+0 -14 Td
+(- _plot_confusion_heatmap\(cm: np.ndarray, title: str\) -> plt.Figure) Tj
+0 -14 Td
+(- WandbLogger.__init__\(self, *, project: str, name: Optional[str] = None, config:) Tj
+0 -14 Td
+(Optional[Dict[str, Any]] = None, init_kwargs\)) Tj
+0 -14 Td
+(- WandbLogger.log_config\(self, cfg: Any\) -> None) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/models/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_framework.models.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+ET
+endstream
+endobj
+17 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 16 0 R >>
+endobj
+18 0 obj
+<< /Length 2011 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/models/conv1d.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Defines the Conv1D classification model used by the training pipeline.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Conv1DClassifier.__init__\(self, n_features: int, n_classes: int = 3\)) Tj
+0 -14 Td
+(- External dependencies: torch) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- Conv1DClassifier.__init__\(self, n_features: int, n_classes: int = 3\)) Tj
+0 -14 Td
+(- Conv1DClassifier.forward\(self, x: torch.Tensor\) -> torch.Tensor) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/scripts/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_framework.scripts.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/scripts/train_experiment.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(CLI entrypoint for loading a prepared experiment, training the Conv1D classifier, and) Tj
+0 -14 Td
+(running final evaluation.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- parse_args\(\) -> argparse.Namespace) Tj
+0 -14 Td
+(- main\(\) -> None) Tj
+0 -14 Td
+(- External dependencies: argparse, os, torch) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- parse_args: argparse.Namespace) Tj
+0 -14 Td
+(- main: None) Tj
+0 -14 Td
+(- Side effects: filesystem reads, model training, stdout logging) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- parse_args\(\) -> argparse.Namespace) Tj
+0 -14 Td
+(- main\(\) -> None) Tj
+ET
+endstream
+endobj
+19 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 18 0 R >>
+endobj
+20 0 obj
+<< /Length 2397 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/train/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_framework.train.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Side effects: model training) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/train/evaluator.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Computes split-level metrics, per-ticker metrics, confusion matrices, and profit summaries.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs**) Tj
+0 -14 Td
+(- ExperimentEvaluator.__init__\(self, *, store: PreparedStore, device: torch.device, cfg:) Tj
+0 -14 Td
+(EvalConfig = EvalConfig\(\), logger: Optional[Any] = None\)) Tj
+0 -14 Td
+(- External dependencies: numpy, torch) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- ExperimentEvaluator.__init__\(self, *, store: PreparedStore, device: torch.device, cfg:) Tj
+0 -14 Td
+(EvalConfig = EvalConfig\(\), logger: Optional[Any] = None\)) Tj
+0 -14 Td
+(- ExperimentEvaluator.evaluate_split\(self, split: str, model: torch.nn.Module, loader:) Tj
+0 -14 Td
+(DataLoader, *, step: Optional[int] = None\) -> Tuple[Dict[str, Any], List[Dict[str, Any]],) Tj
+0 -14 Td
+(np.ndarray]) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/train/metrics.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Aggregates classification and profit-oriented evaluation metrics.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- classification_metrics\(y_true: np.ndarray, y_pred: np.ndarray\) -> Dict[str, Any]) Tj
+0 -14 Td
+(- per_ticker_trade_stats\(*, y_pred: np.ndarray, metas: List[Optional[dict]], tids:) Tj
+0 -14 Td
+(np.ndarray\) -> Dict[int, Dict[str, Any]]) Tj
+0 -14 Td
+(- compute_return_stats\(*, y_pred: np.ndarray, metas: List[Optional[dict]], tids:) Tj
+0 -14 Td
+(Optional[np.ndarray] = None\) -> Dict[str, Any]) Tj
+0 -14 Td
+(- External dependencies: numpy) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- classification_metrics: Dict[str, Any]) Tj
+0 -14 Td
+(- per_ticker_trade_stats: Dict[int, Dict[str, Any]]) Tj
+0 -14 Td
+(- compute_return_stats: Dict[str, Any]) Tj
+0 -14 Td
+() Tj
+ET
+endstream
+endobj
+21 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 20 0 R >>
+endobj
+22 0 obj
+<< /Length 2625 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(Key Functions) Tj
+0 -14 Td
+(- classification_metrics\(y_true: np.ndarray, y_pred: np.ndarray\) -> Dict[str, Any]) Tj
+0 -14 Td
+(- per_ticker_trade_stats\(*, y_pred: np.ndarray, metas: List[Optional[dict]], tids:) Tj
+0 -14 Td
+(np.ndarray\) -> Dict[int, Dict[str, Any]]) Tj
+0 -14 Td
+(- compute_return_stats\(*, y_pred: np.ndarray, metas: List[Optional[dict]], tids:) Tj
+0 -14 Td
+(Optional[np.ndarray] = None\) -> Dict[str, Any]) Tj
+0 -14 Td
+(- compute_action_profit_stats\(*, y_pred: np.ndarray, metas: List[Optional[dict]], tids:) Tj
+0 -14 Td
+(np.ndarray\) -> Dict[int, Dict[str, Any]]) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/train/predict.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Runs batched inference and returns aligned predictions, labels, and sample identifiers.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- predict\(model: torch.nn.Module, loader: DataLoader, device: torch.device\) -> Dict[str,) Tj
+0 -14 Td
+(Any]) Tj
+0 -14 Td
+(- External dependencies: numpy, torch) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- predict: Dict[str, Any]) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- predict\(model: torch.nn.Module, loader: DataLoader, device: torch.device\) -> Dict[str,) Tj
+0 -14 Td
+(Any]) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/train/trainer.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Runs epoch training loops, checkpoint selection, and periodic evaluation.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Trainer.__init__\(self, *, model: torch.nn.Module, optimizer: torch.optim.Optimizer,) Tj
+0 -14 Td
+(criterion: torch.nn.Module, device: torch.device, evaluator: Optional[ExperimentEvaluator] =) Tj
+0 -14 Td
+(None, logger: Optional[Any] = None\)) Tj
+0 -14 Td
+(- External dependencies: torch) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Side effects: model training, stdout logging) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- Trainer.__init__\(self, *, model: torch.nn.Module, optimizer: torch.optim.Optimizer,) Tj
+0 -14 Td
+(criterion: torch.nn.Module, device: torch.device, evaluator: Optional[ExperimentEvaluator] =) Tj
+0 -14 Td
+(None, logger: Optional[Any] = None\)) Tj
+0 -14 Td
+(- Trainer.train_one_epoch\(self, loader: DataLoader\) -> float) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_framework/train/utils.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Implements the utils module in the Training / Evaluation layer.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- class_weights_from_dataset\(ds: Dataset, n_classes: int = 3\) -> np.ndarray) Tj
+ET
+endstream
+endobj
+23 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 22 0 R >>
+endobj
+24 0 obj
+<< /Length 2153 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(- External dependencies: numpy, torch) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- class_weights_from_dataset: np.ndarray) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- class_weights_from_dataset\(ds: Dataset, n_classes: int = 3\) -> np.ndarray) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_prepare_data.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: os) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/data_loading.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Loads a prepared experiment from disk and exposes PyTorch datasets and loaders for each) Tj
+0 -14 Td
+(split.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- _load_jsonl\(path: Path\) -> List[Optional[dict]]) Tj
+0 -14 Td
+(- PreparedStore.__init__\(self, exp_dir: Path\)) Tj
+0 -14 Td
+(- IndexWindowDataset.__init__\(self, store: PreparedStore, index: np.ndarray, lookback_L:) Tj
+0 -14 Td
+(int\)) Tj
+0 -14 Td
+(- External dependencies: json, numpy, os, torch) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- _load_jsonl: List[Optional[dict]]) Tj
+0 -14 Td
+(- Side effects: filesystem reads) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- _load_jsonl\(path: Path\) -> List[Optional[dict]]) Tj
+0 -14 Td
+(- PreparedStore.__init__\(self, exp_dir: Path\)) Tj
+0 -14 Td
+(- PreparedStore.window_and_label\(self, tid: int, tpos: int, L: int\) -> Tuple[np.ndarray,) Tj
+0 -14 Td
+(int]) Tj
+0 -14 Td
+(- IndexWindowDataset.__init__\(self, store: PreparedStore, index: np.ndarray, lookback_L:) Tj
+0 -14 Td
+(int\)) Tj
+0 -14 Td
+(- IndexWindowDataset.__len__\(self\) -> int) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/data_loading_utils.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Implements the data loading utils module in the Data Preparation layer.) Tj
+0 -14 Td
+() Tj
+ET
+endstream
+endobj
+25 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 24 0 R >>
+endobj
+26 0 obj
+<< /Length 2013 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(Inputs) Tj
+0 -14 Td
+(- summary\(self, display: bool = True\) -> Dict[str, Any]) Tj
+0 -14 Td
+(- External dependencies: numpy) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- summary: Dict[str, Any]) Tj
+0 -14 Td
+(- Side effects: stdout logging) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- summary\(self, display: bool = True\) -> Dict[str, Any]) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/dataset_preparation_utils.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Implements the dataset preparation utils module in the Data Preparation layer.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- ensure_utc_sorted_index\(df: pd.DataFrame\) -> pd.DataFrame) Tj
+0 -14 Td
+(- External dependencies: pandas) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- ensure_utc_sorted_index: pd.DataFrame) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- ensure_utc_sorted_index\(df: pd.DataFrame\) -> pd.DataFrame) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/features/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_prepare_data.features.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/features/feature_engineering.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Creates OHLCV and technical indicator features, with optional standardization.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- FeatureEngineer.fit\(self, df: pd.DataFrame\) -> 'FeatureEngineer') Tj
+0 -14 Td
+(- BaseDFEngineer.fit\(self, df: pd.DataFrame\) -> 'BaseDFEngineer') Tj
+0 -14 Td
+(- External dependencies: numpy, pandas) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Side effects: filesystem reads) Tj
+0 -14 Td
+() Tj
+ET
+endstream
+endobj
+27 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 26 0 R >>
+endobj
+28 0 obj
+<< /Length 2489 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(Key Functions) Tj
+0 -14 Td
+(- FeatureEngineer.fit\(self, df: pd.DataFrame\) -> 'FeatureEngineer') Tj
+0 -14 Td
+(- FeatureEngineer.transform\(self, df: pd.DataFrame\) -> tuple[np.ndarray, list[str]]) Tj
+0 -14 Td
+(- BaseDFEngineer.fit\(self, df: pd.DataFrame\) -> 'BaseDFEngineer') Tj
+0 -14 Td
+(- BaseDFEngineer.get_meta\(self\) -> dict) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/labelling/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_prepare_data.labelling.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/labelling/tripple_bar.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Applies triple-barrier labeling and keeps per-sample metadata for later profit analysis.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Labeler.fit\(self, df: pd.DataFrame\) -> 'Labeler') Tj
+0 -14 Td
+(- TripleBarrierLabeler.fit\(self, df: pd.DataFrame\) -> 'TripleBarrierLabeler') Tj
+0 -14 Td
+(- External dependencies: numpy, pandas, tqdm) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- Labeler.fit\(self, df: pd.DataFrame\) -> 'Labeler') Tj
+0 -14 Td
+(- Labeler.transform\(self, df: pd.DataFrame\) -> tuple[np.ndarray, List[Optional[dict]]]) Tj
+0 -14 Td
+(- TripleBarrierLabeler.fit\(self, df: pd.DataFrame\) -> 'TripleBarrierLabeler') Tj
+0 -14 Td
+(- TripleBarrierLabeler.transform\(self, df: pd.DataFrame\) -> tuple[np.ndarray,) Tj
+0 -14 Td
+(list[Optional[dict]]]) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/plot_labelling/vary_labeller_runs.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Implements the vary labeller runs module in the Analysis Utilities layer.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- _stable_sweep_exp_id\(prefix: str, payload: dict\) -> str) Tj
+0 -14 Td
+(- _empty_class_counts\(\) -> Dict[str, int]) Tj
+0 -14 Td
+(- _extract_per_ticker_counts_from_prepared\(exp: PreparedExperiment\) -> dict[str, Any]) Tj
+0 -14 Td
+(- External dependencies: hashlib, json, numpy, pickle, shutil) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- _stable_sweep_exp_id: str) Tj
+ET
+endstream
+endobj
+29 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 28 0 R >>
+endobj
+30 0 obj
+<< /Length 2741 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(- _empty_class_counts: Dict[str, int]) Tj
+0 -14 Td
+(- _extract_per_ticker_counts_from_prepared: dict[str, Any]) Tj
+0 -14 Td
+(- Side effects: filesystem reads, filesystem writes, stdout logging) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- _stable_sweep_exp_id\(prefix: str, payload: dict\) -> str) Tj
+0 -14 Td
+(- _empty_class_counts\(\) -> Dict[str, int]) Tj
+0 -14 Td
+(- _extract_per_ticker_counts_from_prepared\(exp: PreparedExperiment\) -> dict[str, Any]) Tj
+0 -14 Td
+(- run_sweep_and_save_pkl\(*, downloaded_splits: list[DownloadedDatasetSplit],) Tj
+0 -14 Td
+(out_root_prepared: Path, out_pkl_path: Path, width_minutes_grid: List[int], height_grid:) Tj
+0 -14 Td
+(List[float], lookback_L: int = 200, subsample_every: int = 1, drop_time_exit_label: bool =) Tj
+0 -14 Td
+(False\) -> Path) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/plot_labelling/vary_labeller_runs_plot.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Implements the vary labeller runs plot module in the Analysis Utilities layer.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- _load_pkl\(path: Path\) -> dict[str, Any]) Tj
+0 -14 Td
+(- _run_label\(r: dict[str, Any]\) -> str) Tj
+0 -14 Td
+(- plot_per_ticker_split_counts\(payload: dict[str, Any], *, split: str, out_path: Path | None) Tj
+0 -14 Td
+(= None\)) Tj
+0 -14 Td
+(- External dependencies: matplotlib, numpy, pickle) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- _load_pkl: dict[str, Any]) Tj
+0 -14 Td
+(- _run_label: str) Tj
+0 -14 Td
+(- plot_per_ticker_split_counts: untyped return) Tj
+0 -14 Td
+(- Side effects: filesystem reads, filesystem writes, stdout logging, visual reporting) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- _load_pkl\(path: Path\) -> dict[str, Any]) Tj
+0 -14 Td
+(- _run_label\(r: dict[str, Any]\) -> str) Tj
+0 -14 Td
+(- plot_per_ticker_split_counts\(payload: dict[str, Any], *, split: str, out_path: Path | None) Tj
+0 -14 Td
+(= None\)) Tj
+0 -14 Td
+(- main\(\)) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/prepare_experiment.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Builds prepared train/validation/test datasets from raw ticker data, sampling, feature) Tj
+0 -14 Td
+(engineering, and labeling.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- valid_target_positions\(labels: np.ndarray, lookback_L: int\) -> np.ndarray) Tj
+0 -14 Td
+(- _json_default\(x\)) Tj
+0 -14 Td
+(- save_label_metadata_jsonl\(tdir: Path, metadata: List[Optional[dict]]\) -> None) Tj
+0 -14 Td
+(- ExperimentConfig.stable_id\(self\) -> str) Tj
+0 -14 Td
+(- External dependencies: hashlib, json, numpy, pandas, tqdm) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- valid_target_positions: np.ndarray) Tj
+ET
+endstream
+endobj
+31 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 30 0 R >>
+endobj
+32 0 obj
+<< /Length 2544 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(- _json_default: untyped return) Tj
+0 -14 Td
+(- save_label_metadata_jsonl: None) Tj
+0 -14 Td
+(- Side effects: filesystem reads, filesystem writes, stdout logging, visual reporting) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- valid_target_positions\(labels: np.ndarray, lookback_L: int\) -> np.ndarray) Tj
+0 -14 Td
+(- _json_default\(x\)) Tj
+0 -14 Td
+(- save_label_metadata_jsonl\(tdir: Path, metadata: List[Optional[dict]]\) -> None) Tj
+0 -14 Td
+(- save_ticker_artifacts\(tdir: Path, X: np.ndarray, y: np.ndarray, ts: np.ndarray, meta:) Tj
+0 -14 Td
+(dict, label_metadata: Optional[list[Optional[dict]]] = None\) -> None) Tj
+0 -14 Td
+(- ExperimentConfig.stable_id\(self\) -> str) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/reporting.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Generates dataset sampling density diagnostics and reports.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- _load_json\(path: Path\) -> dict) Tj
+0 -14 Td
+(- _daily_sample_counts_from_timestamps\(ts: np.ndarray\) -> pd.Series) Tj
+0 -14 Td
+(- _save_hist_png\(values: np.ndarray, out_path: Path, title: str, bins: int = 50\) -> None) Tj
+0 -14 Td
+(- External dependencies: json, numpy, pandas) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- _load_json: dict) Tj
+0 -14 Td
+(- _daily_sample_counts_from_timestamps: pd.Series) Tj
+0 -14 Td
+(- _save_hist_png: None) Tj
+0 -14 Td
+(- Side effects: filesystem reads, filesystem writes, stdout logging, visual reporting) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- _load_json\(path: Path\) -> dict) Tj
+0 -14 Td
+(- _daily_sample_counts_from_timestamps\(ts: np.ndarray\) -> pd.Series) Tj
+0 -14 Td
+(- _save_hist_png\(values: np.ndarray, out_path: Path, title: str, bins: int = 50\) -> None) Tj
+0 -14 Td
+(- report_sampling_density\(exp_dir: Path, *, tickers: Optional[List[str]] = None, bins: int =) Tj
+0 -14 Td
+(50, print_table: bool = True\) -> pd.DataFrame) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/samplers/__init__.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Package marker for kvant.ml_prepare_data.samplers.__init__.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- Package import only) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/samplers/sampler_cumsum.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+ET
+endstream
+endobj
+33 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 32 0 R >>
+endobj
+34 0 obj
+<< /Length 2673 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(Implements the tuned CUSUM sampler used to reduce minute bars into event bars.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- _cusum_event_ends\(close: np.ndarray, h: float\) -> np.ndarray) Tj
+0 -14 Td
+(- _aggregate_ohlcv_segments\(df: pd.DataFrame, ends: np.ndarray\) -> pd.DataFrame) Tj
+0 -14 Td
+(- _bars_per_day\(df: pd.DataFrame, ends: np.ndarray\) -> float) Tj
+0 -14 Td
+(- TunedCUSUMBarSampler.fit\(self, ticker_dfs_train: Dict[str, pd.DataFrame]\) ->) Tj
+0 -14 Td
+('TunedCUSUMBarSampler') Tj
+0 -14 Td
+(- External dependencies: numpy, pandas) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- _cusum_event_ends: np.ndarray) Tj
+0 -14 Td
+(- _aggregate_ohlcv_segments: pd.DataFrame) Tj
+0 -14 Td
+(- _bars_per_day: float) Tj
+0 -14 Td
+(- Side effects: filesystem reads) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- _cusum_event_ends\(close: np.ndarray, h: float\) -> np.ndarray) Tj
+0 -14 Td
+(- _aggregate_ohlcv_segments\(df: pd.DataFrame, ends: np.ndarray\) -> pd.DataFrame) Tj
+0 -14 Td
+(- _bars_per_day\(df: pd.DataFrame, ends: np.ndarray\) -> float) Tj
+0 -14 Td
+(- TunedCUSUMBarSampler.fit\(self, ticker_dfs_train: Dict[str, pd.DataFrame]\) ->) Tj
+0 -14 Td
+('TunedCUSUMBarSampler') Tj
+0 -14 Td
+(- TunedCUSUMBarSampler.get_global_meta\(self\) -> dict) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: src/kvant/ml_prepare_data/samplers/sampling.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Defines the sampler protocol and simple baseline samplers.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- BaseBarSampler.fit\(self, ticker_dfs_train: Dict[str, pd.DataFrame]\) -> 'BaseBarSampler') Tj
+0 -14 Td
+(- IdentitySampler.fit\(self, ticker_dfs_train: Dict[str, pd.DataFrame]\) -> 'IdentitySampler') Tj
+0 -14 Td
+(- External dependencies: pandas) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- Package marker with no direct runtime output.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- BaseBarSampler.fit\(self, ticker_dfs_train: Dict[str, pd.DataFrame]\) -> 'BaseBarSampler') Tj
+0 -14 Td
+(- BaseBarSampler.get_global_meta\(self\) -> dict) Tj
+0 -14 Td
+(- IdentitySampler.fit\(self, ticker_dfs_train: Dict[str, pd.DataFrame]\) -> 'IdentitySampler') Tj
+0 -14 Td
+(- IdentitySampler.get_global_meta\(self\) -> dict) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: tasks.py) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose) Tj
+0 -14 Td
+(Invoke task entrypoints for testing, Docker builds, and docs commands.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Inputs) Tj
+0 -14 Td
+(- preprocess_data\(ctx: Context\) -> None) Tj
+0 -14 Td
+(- train\(ctx: Context\) -> None) Tj
+0 -14 Td
+(- test\(ctx: Context\) -> None) Tj
+0 -14 Td
+(- External dependencies: none) Tj
+ET
+endstream
+endobj
+35 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 34 0 R >>
+endobj
+36 0 obj
+<< /Length 423 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+() Tj
+0 -14 Td
+(Outputs) Tj
+0 -14 Td
+(- preprocess_data: None) Tj
+0 -14 Td
+(- train: None) Tj
+0 -14 Td
+(- test: None) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key Functions) Tj
+0 -14 Td
+(- preprocess_data\(ctx: Context\) -> None) Tj
+0 -14 Td
+(- train\(ctx: Context\) -> None) Tj
+0 -14 Td
+(- test\(ctx: Context\) -> None) Tj
+0 -14 Td
+(- docker_build\(ctx: Context, progress: str = 'plain'\) -> None`) Tj
+ET
+endstream
+endobj
+37 0 obj
+<< /Type /Page /Parent 38 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents 36 0 R >>
+endobj
+38 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R 9 0 R 11 0 R 13 0 R 15 0 R 17 0 R 19 0 R 21 0 R 23 0 R 25 0 R 27 0 R 29 0 R 31 0 R 33 0 R 35 0 R 37 0 R] /Count 18 >>
+endobj
+39 0 obj
+<< /Type /Catalog /Pages 38 0 R >>
+endobj
+xref
+0 40
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000002598 00000 n 
+0000002725 00000 n 
+0000005382 00000 n 
+0000005509 00000 n 
+0000008202 00000 n 
+0000008329 00000 n 
+0000010792 00000 n 
+0000010919 00000 n 
+0000012683 00000 n 
+0000012812 00000 n 
+0000015120 00000 n 
+0000015249 00000 n 
+0000017610 00000 n 
+0000017739 00000 n 
+0000019994 00000 n 
+0000020123 00000 n 
+0000022187 00000 n 
+0000022316 00000 n 
+0000024766 00000 n 
+0000024895 00000 n 
+0000027573 00000 n 
+0000027702 00000 n 
+0000029908 00000 n 
+0000030037 00000 n 
+0000032103 00000 n 
+0000032232 00000 n 
+0000034774 00000 n 
+0000034903 00000 n 
+0000037697 00000 n 
+0000037826 00000 n 
+0000040423 00000 n 
+0000040552 00000 n 
+0000043278 00000 n 
+0000043407 00000 n 
+0000043882 00000 n 
+0000044011 00000 n 
+0000044186 00000 n 
+trailer
+<< /Size 40 /Root 39 0 R >>
+startxref
+44237
+%%EOF
