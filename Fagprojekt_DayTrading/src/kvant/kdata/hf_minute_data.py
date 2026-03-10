@@ -441,13 +441,23 @@ if __name__ == "__main__":
         color_map = {0: "red", 1: "blue", 2: "green", None: "black"}
         colors = [color_map.get(l, "black") for l in labels]
 
-        plt.figure(figsize=(14, 5))
-        plt.scatter(x, y, c=colors, s=9, linewidths=0)
+        fig, ax = plt.subplots(figsize=(14, 5))
+        ax.scatter(x, y, c=colors, s=9, linewidths=0)
 
-        plt.xlabel("time (UTC)")
-        plt.ylabel("close")
-        plt.title(f"Triple-bar labels (n={n}, width={width}m, height={height}); (red: down, green: up)")
+        ax.set_xlabel("time (UTC)")
+        ax.set_ylabel("close")
+        ax.set_title(f"Triple-bar labels (n={n}, width={width}m, height={height}); (red: down, green: up)")
+        fig.tight_layout()
+        return fig
 
-    plot_triple_bar_first_n(df, n=3000, width=120, height=0.02)
-    plt.show()
-
+    fig = plot_triple_bar_first_n(df, n=3000, width=120, height=0.02)
+    backend = plt.get_backend().lower()
+    if "agg" in backend:
+        out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "artifacts"))
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, "triple_bar_labels.png")
+        fig.savefig(out_path, dpi=150)
+        print(f"Saved plot to {out_path} (backend={backend})")
+        plt.close(fig)
+    else:
+        plt.show()
