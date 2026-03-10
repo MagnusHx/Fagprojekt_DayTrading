@@ -7,6 +7,7 @@ import pyarrow.compute as pc
 import os
 import pyarrow.parquet as pq
 from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import HfHubHTTPError
 from huggingface_hub.utils import LocalEntryNotFoundError
 from collections import defaultdict
 import tqdm
@@ -18,21 +19,36 @@ REPO_ID = "mito0o852/OHLCV-1m"
 MONTH_FILE = "data/ohlcv_2025-01.parquet"   # change if needed
 
 
+def _hf_token() -> str | None:
+    return os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+
+
 def get_dataset_file(repo_id: str, filename: str) -> str:
     try:
         return hf_hub_download(
             repo_id=repo_id,
             repo_type="dataset",
             filename=filename,
+            token=_hf_token(),
             local_files_only=True,   # <- guarantees no network
         )
     except LocalEntryNotFoundError:
         print("> Cache unavailable, downloading remotely from hugging face", filename)
-        return hf_hub_download(
-            repo_id=repo_id,
-            repo_type="dataset",
-            filename=filename,
-        )
+        try:
+            return hf_hub_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                filename=filename,
+                token=_hf_token(),
+            )
+        except HfHubHTTPError as exc:
+            status_code = getattr(exc.response, "status_code", None)
+            if status_code == 429:
+                raise RuntimeError(
+                    "Hugging Face rate limit (HTTP 429). Set HF_TOKEN (or HUGGINGFACE_HUB_TOKEN) "
+                    "to an authenticated token to increase limits and avoid long retry waits."
+                ) from exc
+            raise
 
 
 def get_raw_monthly_data(year, month_zero_indexed):
