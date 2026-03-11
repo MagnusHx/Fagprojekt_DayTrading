@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import torch
@@ -17,8 +18,8 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-project = os.environ.get("WANDB_PROJECT", "kvant-stocks")
-entity = os.environ.get("WANDB_ENTITY", None)
+project = os.environ.get("WANDB_PROJECT", "Kvant")
+entity = os.environ.get("WANDB_ENTITY", "s245509-danmarks-tekniske-universitet-dtu")
 
 
 
@@ -35,26 +36,32 @@ def parse_args() -> argparse.Namespace:
 
     from kvant.ml_prepare_data import prepared_data_root
     default_exp_dir = prepared_data_root / exp_id
+    default_cv_manifest = None
+    cv_ptr = prepared_data_root / "last_experiment_cv_manifest.txt"
+    if cv_ptr.exists():
+        p = Path(cv_ptr.read_text().strip())
+        if p.exists():
+            default_cv_manifest = p
     # default_exp_dir = Path("../src/kvant/ml_framework/prepared") / exp_id
 
     p = argparse.ArgumentParser()
     p.add_argument("--exp-dir", type=Path, required=False, default=default_exp_dir)
-    p.add_argument("--epochs", type=int, default=5000)
+    p.add_argument("--cv-manifest", type=Path, required=False, default=default_cv_manifest)
+    p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--lr", type=float, default=5e-3)
     p.add_argument("--weight-decay", type=float, default=5e-5)
     p.add_argument("--train-batch-size", type=int, default=256)
     p.add_argument("--eval-batch-size", type=int, default=512)
     p.add_argument("--wandb-project", type=str, default="kvant-stocks")
     p.add_argument("--wandb-name", type=str, default=None)
+    p.add_argument("--wandb-api-timeout", type=int, default=29)
     p.add_argument("--no-return-stats", action="store_true")
     p.add_argument("--topk-ticker-plots", type=int, default=50)
     return p.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-
-    exp = PreparedExperiment(args.exp_dir)
+def run_single_fold(args: argparse.Namespace, exp_dir: Path, fold_tag: str | None = None) -> float:
+    exp = PreparedExperiment(exp_dir)
     dl_train, dl_val, dl_test = exp.get_loaders(
         train_batch_size=args.train_batch_size,
         eval_batch_size=args.eval_batch_size,
@@ -91,9 +98,11 @@ def main() -> None:
     logger = WandbLogger(
         project=project,
         entity=entity,
-        name=args.wandb_name or "stocks-run",
+        name=(args.wandb_name or "stocks-run") if fold_tag is None else f"{(args.wandb_name or 'stocks-run')}-{fold_tag}",
+        api_timeout=args.wandb_api_timeout,
         config={
-            "exp_dir": str(args.exp_dir),
+            "exp_dir": str(exp_dir),
+            "fold_tag": fold_tag,
             "epochs": args.epochs,
             "lr": args.lr,
             "weight_decay": args.weight_decay,
@@ -156,6 +165,37 @@ def main() -> None:
         step=args.epochs + 1,
     )
     logger.stop()
+    return float(out["best_metric"])
+
+
+def main() -> None:
+    args = parse_args()
+
+    if args.cv_manifest is not None and args.cv_manifest.exists():
+        payload = json.loads(args.cv_manifest.read_text())
+        folds = payload.get("folds", [])
+        if not folds:
+            raise RuntimeError(f"No folds found in cv manifest: {args.cv_manifest}")
+
+        bests = []
+        for fold in folds:
+            fold_idx = int(fold["fold_idx"])
+            exp_dir = Path(fold["exp_dir"])
+            fold_tag = f"fold{fold_idx:02d}"
+            print(f"\n=== Training {fold_tag} on {exp_dir} ===")
+            best_metric = run_single_fold(args, exp_dir=exp_dir, fold_tag=fold_tag)
+            bests.append(best_metric)
+
+        mean_best = sum(bests) / len(bests)
+        var_best = sum((x - mean_best) ** 2 for x in bests) / len(bests)
+        std_best = var_best ** 0.5
+        print("\nCross-validation summary:")
+        print(f"  folds={len(bests)}")
+        print(f"  best val/accuracy mean={mean_best:.6f}")
+        print(f"  best val/accuracy std={std_best:.6f}")
+        return
+
+    run_single_fold(args, exp_dir=args.exp_dir, fold_tag=None)
 
 if __name__ == "__main__":
     main()

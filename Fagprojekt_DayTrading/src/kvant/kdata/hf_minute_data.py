@@ -437,9 +437,18 @@ if __name__ == "__main__":
     y = df.loc[idx, "close"].to_numpy()
     print("Total profit was", sum(trades))
 
-    def plot_triple_bar_first_n(df, n=600, width=60, height=0.005):
+    def plot_triple_bar_first_n(df, ticker_name=None, n=600, width=60, height=0.005):
         df = df.sort_index()
         idx = df.index[:n]
+
+        if len(idx) == 0:
+            raise ValueError("Cannot plot an empty dataframe")
+
+        if ticker_name is None:
+            if "ticker" in df.columns and not df["ticker"].dropna().empty:
+                ticker_name = str(df["ticker"].dropna().iloc[0])
+            else:
+                ticker_name = "unknown"
 
         labels = np.empty(len(idx), dtype=object)  # store 0/1/2 or None
         for i, t in enumerate(idx):
@@ -457,16 +466,49 @@ if __name__ == "__main__":
         color_map = {0: "red", 1: "blue", 2: "green", None: "black"}
         colors = [color_map.get(l, "black") for l in labels]
 
-        fig, ax = plt.subplots(figsize=(14, 5))
+        label_counts = pd.Series(labels).value_counts(dropna=False)
+        summary_lines = [
+            f"Ticker: {ticker_name}",
+            f"Rows shown: {len(idx):,}",
+            f"Range: {idx[0]} → {idx[-1]}",
+            f"Close: {y[0]:.2f} → {y[-1]:.2f}",
+            f"Return: {(y[-1] / y[0] - 1) * 100:.2f}%",
+            f"Down / Flat / Up: {label_counts.get(0, 0)} / {label_counts.get(1, 0)} / {label_counts.get(2, 0)}",
+            f"No label: {label_counts.get(None, 0)}",
+            f"Width: {width} min | Height: {height:.2%}",
+        ]
+
+        from matplotlib.lines import Line2D
+
+        legend_handles = [
+            Line2D([0], [0], marker="o", color="w", label="Down barrier hit", markerfacecolor="red", markersize=7),
+            Line2D([0], [0], marker="o", color="w", label="Vertical barrier", markerfacecolor="blue", markersize=7),
+            Line2D([0], [0], marker="o", color="w", label="Up barrier hit", markerfacecolor="green", markersize=7),
+            Line2D([0], [0], marker="o", color="w", label="No label", markerfacecolor="black", markersize=7),
+        ]
+
+        fig, ax = plt.subplots(figsize=(16, 6))
         ax.scatter(x, y, c=colors, s=9, linewidths=0)
 
         ax.set_xlabel("time (UTC)")
         ax.set_ylabel("close")
-        ax.set_title(f"Triple-bar labels (n={n}, width={width}m, height={height}); (red: down, green: up)")
+        ax.set_title(f"Triple-bar labels for {ticker_name}")
+        ax.grid(alpha=0.2)
+        ax.legend(handles=legend_handles, loc="upper left")
+        ax.text(
+            1.02,
+            0.98,
+            "\n".join(summary_lines),
+            transform=ax.transAxes,
+            va="top",
+            fontsize=9,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.9},
+        )
+        fig.subplots_adjust(right=0.8)
         fig.tight_layout()
         return fig
 
-    fig = plot_triple_bar_first_n(df, n=3000, width=120, height=0.02)
+    fig = plot_triple_bar_first_n(df, ticker_name=ticker, n=3000, width=120, height=0.02)
     backend = plt.get_backend().lower()
     if "agg" in backend:
         out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "artifacts"))

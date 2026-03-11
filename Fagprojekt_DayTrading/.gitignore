@@ -1,4 +1,6 @@
 docs/site/
+src/kvant/ml_framework/prepared/
+wandb/
 
 # test cache
 manual_test/

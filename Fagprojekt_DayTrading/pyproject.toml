@@ -29,6 +29,7 @@ dependencies = [
     "typer==0.15.1",
     "uvicorn==0.34.0",
     "vectorbt>=0.28.2",
+    "wandb>=0.25.1",
 ]
 
 [dependency-groups]

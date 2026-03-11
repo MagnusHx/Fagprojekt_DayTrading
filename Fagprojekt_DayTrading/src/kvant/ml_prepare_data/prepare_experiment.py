@@ -533,62 +533,81 @@ def prepare_single_dataset(dataset_split : DownloadedDatasetSplit, sampler, feat
 # ============================================================
 def main():
     downloaded_splits = get_huggingface_top_20_normal_splits()
-    ticker_data_train, ticker_data_val, ticker_data_test = get_ticker_data(downloaded_splits[-1])
 
     TBPD = 30
-    sampler = TunedCUSUMBarSampler(target_bars_per_day=TBPD, aggregate_ohlcv=True)
-    # fe = OHLCVFeatures(cols=("open", "high", "low", "close", "volume"), log1p_volume=True)
-
-    base_fe = IntradayTA10Features(
-        volume_output="log1p",
-        include_time_features=True,
-        typical_bar_minutes=None,  # periods in bars (paper style)
-        fillna_value=0.0,
-    )
-    fe = StandardizedFeatures(base=base_fe)
-
-    # fe
     L, width, height_pct = 12, 120, 1.5
     label = f"sb_L_{L}_w{width}_h{height_pct}_TBPD{TBPD}"
     print(f"Writing to {label=}")
-    labeler = TripleBarrierLabeler(
-        name=label,
-        width_minutes=width,
-        height=height_pct / 100,
-        drop_time_exit_label=False
-    )
-
-    cfg = ExperimentConfig(
-        experiment_name="exp_minimal_sep_components",
-        sampler=asdict(sampler),
-        feature_engineer=asdict(fe),
-        labeler=asdict(labeler),
-        lookback_L=L,
-    )
 
     from kvant.ml_prepare_data import prepared_data_root
 
-    prepared = prepare_experiment(
-        out_root=prepared_data_root,
-        cfg=cfg,
-        sampler=sampler,
-        fe=fe,
-        labeler=labeler,
-        ticker_dfs_train=ticker_data_train,
-        ticker_dfs_val=ticker_data_val,
-        ticker_dfs_test=ticker_data_test,
-        experiment_id=label
-    )
+    cv_rows = []
+    last_prepared = None
+    for fold_idx, split in enumerate(downloaded_splits):
+        print(f"\nPreparing fold {fold_idx + 1}/{len(downloaded_splits)}")
+        ticker_data_train, ticker_data_val, ticker_data_test = get_ticker_data(split)
 
-    # NEW: post-step density report + histograms
-    report_sampling_density(prepared.exp_dir, bins=60, print_table=True)
-    print("Experiment prepared at:", prepared.exp_dir)
-    import os
-    os.path.basename(prepared.exp_dir)
-    from kvant.ml_prepare_data import prepared_data_root
-    with open( prepared_data_root / "last_experiment.txt", 'w') as f:
-        f.write(name := os.path.basename( prepared.exp_dir) )
-        print("Wrote name to", name)
+        sampler = TunedCUSUMBarSampler(target_bars_per_day=TBPD, aggregate_ohlcv=True)
+        base_fe = IntradayTA10Features(
+            volume_output="log1p",
+            include_time_features=True,
+            typical_bar_minutes=None,  # periods in bars (paper style)
+            fillna_value=0.0,
+        )
+        fe = StandardizedFeatures(base=base_fe)
+        labeler = TripleBarrierLabeler(
+            name=label,
+            width_minutes=width,
+            height=height_pct / 100,
+            drop_time_exit_label=False
+        )
+
+        cfg = ExperimentConfig(
+            experiment_name="exp_minimal_sep_components",
+            sampler=asdict(sampler),
+            feature_engineer=asdict(fe),
+            labeler=asdict(labeler),
+            lookback_L=L,
+        )
+
+        fold_id = f"{label}_fold{fold_idx:02d}"
+        prepared = prepare_experiment(
+            out_root=prepared_data_root,
+            cfg=cfg,
+            sampler=sampler,
+            fe=fe,
+            labeler=labeler,
+            ticker_dfs_train=ticker_data_train,
+            ticker_dfs_val=ticker_data_val,
+            ticker_dfs_test=ticker_data_test,
+            experiment_id=fold_id,
+        )
+        report_sampling_density(prepared.exp_dir, bins=60, print_table=True)
+        print("Experiment prepared at:", prepared.exp_dir)
+        last_prepared = prepared
+
+        cv_rows.append(
+            {
+                "fold_idx": int(fold_idx),
+                "exp_id": str(prepared.exp_dir.name),
+                "exp_dir": str(prepared.exp_dir.resolve()),
+                "year_quarter_train": split.split.year_quarter_train,
+                "year_quarter_val": split.split.year_quarter_val,
+                "year_quarter_test": split.split.year_quarter_test,
+            }
+        )
+
+    manifest_path = prepared_data_root / f"{label}_cv_manifest.json"
+    manifest_path.write_text(json.dumps({"label": label, "n_folds": len(cv_rows), "folds": cv_rows}, indent=2))
+    print(f"Wrote CV manifest to {manifest_path}")
+
+    if last_prepared is not None:
+        with open(prepared_data_root / "last_experiment.txt", "w") as f:
+            f.write(last_prepared.exp_dir.name)
+            print("Wrote name to", last_prepared.exp_dir.name)
+        with open(prepared_data_root / "last_experiment_cv_manifest.txt", "w") as f:
+            f.write(str(manifest_path))
+            print("Wrote CV manifest pointer to", manifest_path)
 
 
 if __name__ == "__main__":

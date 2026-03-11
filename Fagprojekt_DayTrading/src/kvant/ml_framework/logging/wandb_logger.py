@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any, Dict, Optional, List
 from collections import defaultdict
 
 import numpy as np
+import pandas as pd
 import wandb
 import matplotlib.pyplot as plt
 
@@ -72,6 +75,201 @@ def _plot_confusion_heatmap(cm: np.ndarray, title: str) -> plt.Figure:
     return fig
 
 
+def _safe_pct(num: float, den: float) -> float:
+    return 0.0 if den == 0 else float(num) / float(den)
+
+
+def _parse_ts(x: Any) -> pd.Timestamp | None:
+    if x in (None, "", "None"):
+        return None
+    try:
+        ts = pd.Timestamp(x)
+    except Exception:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return ts
+
+
+def _plot_split_class_balance(split_stats: Dict[str, dict]) -> plt.Figure:
+    splits = [s for s in ["train", "val", "test"] if s in split_stats]
+    cls_ids = [0, 1, 2]
+    cls_labels = [CLASS_NAMES[c] for c in cls_ids]
+    x = np.arange(len(splits))
+
+    counts = np.array([
+        [int((split_stats[s].get("y_counts", {}) or {}).get(c, 0)) for s in splits]
+        for c in cls_ids
+    ], dtype=np.float64)
+    totals = counts.sum(axis=0, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        shares = np.where(totals > 0, counts / totals, 0.0)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), dpi=140)
+
+    bottom = np.zeros(len(splits), dtype=np.float64)
+    for i, cls_label in enumerate(cls_labels):
+        axes[0].bar(x, counts[i], bottom=bottom, label=cls_label)
+        bottom += counts[i]
+    axes[0].set_title("Class counts by split")
+    axes[0].set_xticks(x, splits)
+    axes[0].set_ylabel("samples")
+
+    bottom = np.zeros(len(splits), dtype=np.float64)
+    for i, cls_label in enumerate(cls_labels):
+        axes[1].bar(x, 100.0 * shares[i], bottom=100.0 * bottom, label=cls_label)
+        bottom += shares[i]
+    axes[1].set_title("Class share by split")
+    axes[1].set_xticks(x, splits)
+    axes[1].set_ylabel("percent")
+    axes[1].set_ylim(0.0, 100.0)
+
+    handles, labels = axes[1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=3, frameon=False)
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    return fig
+
+
+def _plot_split_time_ranges(split_stats: Dict[str, dict]) -> plt.Figure:
+    rows = []
+    for split in ["train", "val", "test"]:
+        info = split_stats.get(split, {}) or {}
+        start = _parse_ts(info.get("first_ts"))
+        end = _parse_ts(info.get("last_ts"))
+        if start is None or end is None:
+            continue
+        rows.append((split, start, end))
+
+    fig, ax = plt.subplots(figsize=(10, 3.2), dpi=140)
+    if not rows:
+        ax.text(0.5, 0.5, "No split timestamps available", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    colors = {"train": "#4C956C", "val": "#F4A259", "test": "#BC4B51"}
+    y = np.arange(len(rows))
+    left = np.array([r[1].to_pydatetime() for r in rows], dtype=object)
+    widths = np.array([(r[2] - r[1]).total_seconds() / 86400.0 for r in rows], dtype=float)
+
+    for i, (split, start, end) in enumerate(rows):
+        ax.barh(i, widths[i], left=start.to_pydatetime(), color=colors.get(split, "#777777"), alpha=0.9)
+        ax.text(end.to_pydatetime(), i, f" {start.date()} -> {end.date()}", va="center", fontsize=8)
+
+    ax.set_yticks(y, [r[0] for r in rows])
+    ax.set_title("Split time ranges")
+    ax.set_xlabel("time")
+    ax.grid(axis="x", alpha=0.2)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return fig
+
+
+def _plot_split_expansion(split_stats: Dict[str, dict]) -> plt.Figure:
+    train = split_stats.get("train", {}) or {}
+    val = split_stats.get("val", {}) or {}
+    test = split_stats.get("test", {}) or {}
+
+    train_start = _parse_ts(train.get("first_ts"))
+    val_start = _parse_ts(val.get("first_ts"))
+    test_start = _parse_ts(test.get("first_ts"))
+    test_end = _parse_ts(test.get("last_ts"))
+
+    fig, ax = plt.subplots(figsize=(10, 3.6), dpi=140)
+    if None in (train_start, val_start, test_start, test_end):
+        ax.text(0.5, 0.5, "Insufficient timestamps for expansion plot", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    phases = [
+        ("train only", train_start, val_start),
+        ("train + val visible", train_start, test_start),
+        ("full window incl. test", train_start, test_end),
+    ]
+    colors = ["#4C956C", "#F4A259", "#BC4B51"]
+
+    for i, (label, start, end) in enumerate(phases):
+        width = max((end - start).total_seconds() / 86400.0, 0.0)
+        ax.barh(i, width, left=start.to_pydatetime(), color=colors[i], alpha=0.9)
+        ax.text(end.to_pydatetime(), i, f" {label}", va="center", fontsize=8)
+
+    ax.axvline(val_start.to_pydatetime(), color="#F4A259", linestyle="--", linewidth=1)
+    ax.axvline(test_start.to_pydatetime(), color="#BC4B51", linestyle="--", linewidth=1)
+    ax.set_yticks(np.arange(len(phases)), [p[0] for p in phases])
+    ax.set_title("How the split window expands")
+    ax.set_xlabel("time")
+    ax.grid(axis="x", alpha=0.2)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return fig
+
+
+def _plot_top_ticker_class_balance(per_ticker_rows: List[dict], top_n: int = 12) -> plt.Figure:
+    ranked = sorted(per_ticker_rows, key=lambda r: int(r.get("n", 0)), reverse=True)[:top_n]
+    fig, ax = plt.subplots(figsize=(12, 5.5), dpi=140)
+    if not ranked:
+        ax.text(0.5, 0.5, "No per-ticker rows available", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    tickers = [str(r["ticker"]) for r in ranked]
+    cls0 = np.array([int(r.get("y_count_0", 0)) for r in ranked], dtype=float)
+    cls1 = np.array([int(r.get("y_count_1", 0)) for r in ranked], dtype=float)
+    cls2 = np.array([int(r.get("y_count_2", 0)) for r in ranked], dtype=float)
+    total = np.maximum(cls0 + cls1 + cls2, 1.0)
+
+    ax.bar(tickers, 100.0 * cls0 / total, label=CLASS_NAMES[0])
+    ax.bar(tickers, 100.0 * cls1 / total, bottom=100.0 * cls0 / total, label=CLASS_NAMES[1])
+    ax.bar(tickers, 100.0 * cls2 / total, bottom=100.0 * (cls0 + cls1) / total, label=CLASS_NAMES[2])
+    ax.set_title(f"Class balance for top {len(ranked)} tickers by sample count")
+    ax.set_ylabel("percent")
+    ax.set_ylim(0.0, 100.0)
+    ax.tick_params(axis="x", rotation=30)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    return fig
+
+
+def _plot_density_summary(density_rows: List[dict]) -> plt.Figure:
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), dpi=140)
+    if not density_rows:
+        for ax in axes:
+            ax.text(0.5, 0.5, "No density summary available", ha="center", va="center")
+            ax.axis("off")
+        return fig
+
+    retention = np.array([float(r.get("retention_ratio", np.nan)) for r in density_rows], dtype=float)
+    bpd = np.array([float(r.get("bars_per_day_sampled", np.nan)) for r in density_rows], dtype=float)
+    hvals = np.array([
+        float((r.get("sampler_ticker_meta", {}) or {}).get("h", np.nan))
+        for r in density_rows
+    ], dtype=float)
+
+    axes[0].hist(retention[np.isfinite(retention)], bins=min(20, max(5, len(density_rows))), color="#4C956C", edgecolor="black")
+    axes[0].set_title("Retention ratio across tickers")
+    axes[0].set_xlabel("sampled/raw")
+    axes[0].set_ylabel("tickers")
+
+    axes[1].scatter(hvals[np.isfinite(hvals)], bpd[np.isfinite(hvals)], alpha=0.8, color="#2C7DA0")
+    axes[1].set_title("Tuned CUSUM h vs sampled bars/day")
+    axes[1].set_xlabel("tuned h")
+    axes[1].set_ylabel("bars/day")
+    axes[1].grid(alpha=0.2)
+    fig.tight_layout()
+    return fig
+
+
+def _load_density_summary(exp_dir: Path) -> List[dict]:
+    path = exp_dir / "density_summary.json"
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return []
+
+
 class WandbLogger:
     def __init__(
         self,
@@ -79,9 +277,11 @@ class WandbLogger:
         project: str,
         name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
+        api_timeout: int = 29,
         **init_kwargs,
     ):
         self.run = wandb.init(project=project, name=name, config=config or {}, **init_kwargs)
+        self.api = wandb.Api(timeout=int(api_timeout))
 
         # ticker_label -> list of epoch dicts
         self._ticker_history: Dict[str, List[Dict[str, Any]]] = {}
@@ -118,12 +318,15 @@ class WandbLogger:
         dist_table = wandb.Table(
             columns=["split", "n", "first_ts", "last_ts", "y_count_0", "y_count_1", "y_count_2"]
         )
+        split_stats: Dict[str, dict] = {}
+        per_ticker_balance_rows: List[dict] = []
         for split, loader in loaders.items():
             if loader is None:
                 continue
             ds = loader.dataset
             s = ds.summary(display=False)
             overall = s.get("overall", {}) or {}
+            split_stats[str(split)] = overall
             yc = overall.get("y_counts", {}) or {}
             dist_table.add_data(
                 str(split),
@@ -134,7 +337,93 @@ class WandbLogger:
                 _safe_int(yc.get(1, 0)),
                 _safe_int(yc.get(2, 0)),
             )
+
+            for ticker, row in sorted((s.get("per_ticker", {}) or {}).items()):
+                yct = row.get("y_counts", {}) or {}
+                n = _safe_int(row.get("n", 0))
+                per_ticker_balance_rows.append(
+                    {
+                        "split": str(split),
+                        "ticker": str(ticker),
+                        "tid": _safe_int(row.get("tid", -1), default=-1),
+                        "n": n,
+                        "first_ts": row.get("first_ts"),
+                        "last_ts": row.get("last_ts"),
+                        "y_count_0": _safe_int(yct.get(0, 0)),
+                        "y_count_1": _safe_int(yct.get(1, 0)),
+                        "y_count_2": _safe_int(yct.get(2, 0)),
+                        "y_pct_0": _safe_pct(_safe_int(yct.get(0, 0)), n),
+                        "y_pct_1": _safe_pct(_safe_int(yct.get(1, 0)), n),
+                        "y_pct_2": _safe_pct(_safe_int(yct.get(2, 0)), n),
+                    }
+                )
         wandb.log({"data/split_distribution": dist_table})
+
+        balance_table = wandb.Table(
+            columns=[
+                "split", "ticker", "tid", "n", "first_ts", "last_ts",
+                "y_count_0", "y_count_1", "y_count_2",
+                "y_pct_0", "y_pct_1", "y_pct_2",
+            ]
+        )
+        for row in per_ticker_balance_rows:
+            balance_table.add_data(
+                row["split"], row["ticker"], row["tid"], row["n"], row["first_ts"], row["last_ts"],
+                row["y_count_0"], row["y_count_1"], row["y_count_2"],
+                row["y_pct_0"], row["y_pct_1"], row["y_pct_2"],
+            )
+        wandb.log({"data/per_ticker_class_balance": balance_table})
+
+        fig = _plot_split_class_balance(split_stats)
+        wandb.log({"charts/data/class_balance_by_split": wandb.Image(fig)})
+        plt.close(fig)
+
+        fig = _plot_split_time_ranges(split_stats)
+        wandb.log({"charts/data/split_time_ranges": wandb.Image(fig)})
+        plt.close(fig)
+
+        fig = _plot_split_expansion(split_stats)
+        wandb.log({"charts/data/split_expansion": wandb.Image(fig)})
+        plt.close(fig)
+
+        fig = _plot_top_ticker_class_balance([r for r in per_ticker_balance_rows if r["split"] == "train"])
+        wandb.log({"charts/data/top_ticker_train_class_balance": wandb.Image(fig)})
+        plt.close(fig)
+
+        density_rows = _load_density_summary(Path(exp.exp_dir))
+        if density_rows:
+            density_table = wandb.Table(
+                columns=[
+                    "ticker", "n_raw_full", "n_sampled_full", "retention_ratio",
+                    "bars_per_day_raw", "bars_per_day_sampled", "h",
+                    "raw_train", "raw_val", "raw_test",
+                    "sampled_train", "sampled_val", "sampled_test",
+                ]
+            )
+            for row in density_rows:
+                raw_split = row.get("raw_counts_by_split", {}) or {}
+                sampled_split = row.get("sampled_counts_by_split", {}) or {}
+                meta = row.get("sampler_ticker_meta", {}) or {}
+                density_table.add_data(
+                    row.get("ticker"),
+                    _safe_int(row.get("n_raw_full", 0)),
+                    _safe_int(row.get("n_sampled_full", 0)),
+                    _to_float_or_nan(row.get("retention_ratio", np.nan)),
+                    _to_float_or_nan(row.get("bars_per_day_raw", np.nan)),
+                    _to_float_or_nan(row.get("bars_per_day_sampled", np.nan)),
+                    _to_float_or_nan(meta.get("h", np.nan)),
+                    _safe_int(raw_split.get("train", 0)),
+                    _safe_int(raw_split.get("val", 0)),
+                    _safe_int(raw_split.get("test", 0)),
+                    _safe_int(sampled_split.get("train", 0)),
+                    _safe_int(sampled_split.get("val", 0)),
+                    _safe_int(sampled_split.get("test", 0)),
+                )
+            wandb.log({"data/sampling_density": density_table})
+
+            fig = _plot_density_summary(density_rows)
+            wandb.log({"charts/data/sampling_density_summary": wandb.Image(fig)})
+            plt.close(fig)
 
     def log(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
         per_ticker_rows = metrics.pop("_per_ticker_rows", None)
