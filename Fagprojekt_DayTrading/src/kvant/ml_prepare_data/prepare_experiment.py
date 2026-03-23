@@ -1,6 +1,9 @@
 # prepare_experiment.py
-from kvant.ml_prepare_data.features.feature_engineering import IntradayTA10Features, StandardizedFeatures, \
-    FeatureEngineer
+from kvant.ml_prepare_data.features.feature_engineering import (
+    IntradayTA10Features,
+    StandardizedFeatures,
+    FeatureEngineer,
+)
 import json
 import hashlib
 from dataclasses import dataclass, asdict
@@ -14,8 +17,13 @@ from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
 from kvant.ml_prepare_data.reporting import report_sampling_density
 from kvant.ml_prepare_data.samplers.sampler_cumsum import TunedCUSUMBarSampler
 from typing import Dict, Optional, List  # add Any, List
-from kvant.kdata.hf_minute_data import get_ticker_data, DownloadedDatasetSplit, get_huggingface_top_5_small_splits, get_huggingface_top_20_normal_splits
+from kvant.kdata.hf_minute_data import (
+    get_ticker_data,
+    DownloadedDatasetSplit,
+    get_huggingface_top_20_normal_splits,
+)
 from kvant.ml_prepare_data.dataset_preparation_utils import ensure_utc_sorted_index
+
 
 # ============================================================
 # 3) Experiment config + stable id
@@ -37,9 +45,11 @@ class ExperimentConfig:
 # 4) Utilities
 # ============================================================
 
+
 def valid_target_positions(labels: np.ndarray, lookback_L: int) -> np.ndarray:
     pos = np.arange(len(labels))
     return pos[(labels != -1) & (pos >= lookback_L)]
+
 
 def _json_default(x):
     # Fallback serializer for json.dumps
@@ -63,6 +73,7 @@ def save_label_metadata_jsonl(tdir: Path, metadata: List[Optional[dict]]) -> Non
             f.write(json.dumps(item, default=_json_default))
             f.write("\n")
 
+
 def save_ticker_artifacts(
     tdir: Path,
     X: np.ndarray,
@@ -72,15 +83,16 @@ def save_ticker_artifacts(
     label_metadata: Optional[list[Optional[dict]]] = None,
 ) -> None:
     tdir.mkdir(parents=True, exist_ok=True)
-    np.save(tdir / "features.npy", X.astype(np.float32))
-    np.save(tdir / "labels.npy", y.astype(np.int8))
-    np.save(tdir / "timestamps.npy", ts.astype("datetime64[ns]"))
+    np.save(tdir / "features.npy", X.astype(np.float32, copy=False))
+    np.save(tdir / "labels.npy", y.astype(np.int8, copy=False))
+    np.save(tdir / "timestamps.npy", ts.astype("datetime64[ns]", copy=False))
     (tdir / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
 
     if label_metadata is not None:
         if len(label_metadata) != len(y):
             raise RuntimeError(f"label_metadata length {len(label_metadata)} != labels length {len(y)}")
         save_label_metadata_jsonl(tdir, label_metadata)
+
 
 def _as_dt64_utc_naive(x) -> np.datetime64:
     """
@@ -98,6 +110,7 @@ def _as_dt64_utc_naive(x) -> np.datetime64:
     # last resort
     return np.datetime64(pd.Timestamp(x, tz="UTC").tz_localize(None)).astype("datetime64[ns]")
 
+
 def _first_ts_utc_dt64(df: pd.DataFrame) -> np.datetime64:
     df = ensure_utc_sorted_index(df)
     return _as_dt64_utc_naive(df.index[0])
@@ -107,10 +120,13 @@ def _concat_nonempty(parts: list[pd.DataFrame]) -> pd.DataFrame:
     parts2 = [p for p in parts if p is not None and len(p) > 0]
     if not parts2:
         return pd.DataFrame()
+    if len(parts2) == 1:
+        return ensure_utc_sorted_index(parts2[0])
     out = pd.concat([ensure_utc_sorted_index(p) for p in parts2], axis=0)
     # timestamps assumed strictly increasing per ticker; still keep sorted for safety
     out = out.sort_index()
     return out
+
 
 def _in_split(tt, split: str, val_start, test_start) -> bool:
     tt = _as_dt64_utc_naive(tt)
@@ -146,6 +162,7 @@ class PreparedExperimentManifest:
     tickers_train: list[str]
     tickers_val: list[str]
     tickers_test: list[str]
+
 
 def prepare_experiment(
     out_root: Path,
@@ -261,6 +278,10 @@ def prepare_experiment(
     tickers_val = sorted(ticker_dfs_val.keys())
     tickers_test = sorted(ticker_dfs_test.keys())
     tickers_all = sorted(set(tickers_train) | set(tickers_val) | set(tickers_test))
+    print(
+        f"[{exp_id}] Starting prepare_experiment "
+        f"(train={len(tickers_train)}, val={len(tickers_val)}, test={len(tickers_test)}, all={len(tickers_all)})"
+    )
 
     (exp_dir / "tickers_all.json").write_text(json.dumps(tickers_all, indent=2))
     (exp_dir / "tickers_train.json").write_text(json.dumps(tickers_train, indent=2))
@@ -276,15 +297,9 @@ def prepare_experiment(
     # --------------------------------------------------------
     boundaries: dict[str, tuple[Optional[np.datetime64], Optional[np.datetime64]]] = {}
     for t in tickers_all:
-        val_start = (
-            _first_ts_utc_dt64(ticker_dfs_val[t])
-            if t in ticker_dfs_val and len(ticker_dfs_val[t])
-            else None
-        )
+        val_start = _first_ts_utc_dt64(ticker_dfs_val[t]) if t in ticker_dfs_val and len(ticker_dfs_val[t]) else None
         test_start = (
-            _first_ts_utc_dt64(ticker_dfs_test[t])
-            if t in ticker_dfs_test and len(ticker_dfs_test[t])
-            else None
+            _first_ts_utc_dt64(ticker_dfs_test[t]) if t in ticker_dfs_test and len(ticker_dfs_test[t]) else None
         )
         boundaries[t] = (val_start, test_start)
         # --------------------------------------------------------
@@ -295,41 +310,55 @@ def prepare_experiment(
         # --------------------------------------------------------
 
         # 1) Tune sampler on TRAIN ONLY (per-ticker tuning handled internally).
+    print(f"[{exp_id}] Fitting sampler on train tickers...")
     sampler.fit(ticker_dfs_train)
 
     # 2) Persist sampler metadata
     sampler_global_meta = sampler.get_global_meta()
     sampler_per_ticker_meta = {t: sampler.get_ticker_meta(t) for t in tickers_all}
-    (exp_dir / "sampler_global_meta.json").write_text(
-        json.dumps(sampler_global_meta, indent=2, default=_json_default)
-    )
+    (exp_dir / "sampler_global_meta.json").write_text(json.dumps(sampler_global_meta, indent=2, default=_json_default))
     (exp_dir / "sampler_per_ticker_meta.json").write_text(
         json.dumps(sampler_per_ticker_meta, indent=2, default=_json_default)
     )
 
-    # 3) Build df_fit_sampled by sampling each ticker's TRAIN split,
-    #    then concatenating. This is what you want if fe.fit() estimates
-    #    scaling statistics (mean/std) or other global parameters.
-    sampled_parts: list[pd.DataFrame] = []
-    for t in tickers_train:
-        dft = ticker_dfs_train.get(t)
-        if dft is None or len(dft) == 0:
-            continue
-        dft = ensure_utc_sorted_index(dft)
-        dft_s = sampler.transform(dft, ticker=t)
-        if dft_s is not None and len(dft_s) > 0:
-            sampled_parts.append(ensure_utc_sorted_index(dft_s))
+    def _iter_sampled_train_chunks(progress_desc: str | None = None):
+        iterator = tickers_train
+        if progress_desc is not None:
+            iterator = tqdm.tqdm(tickers_train, desc=progress_desc, dynamic_ncols=True)
+        assert iterator is not None
+        for ticker in iterator:
+            dft = ticker_dfs_train.get(ticker)
+            if dft is None or len(dft) == 0:
+                continue
+            dft = ensure_utc_sorted_index(dft)
+            dft_s = sampler.transform(dft, ticker=ticker)
+            if dft_s is None or len(dft_s) == 0:
+                continue
+            yield ensure_utc_sorted_index(dft_s)
 
-    df_fit_sampled = pd.concat(sampled_parts, axis=0) if sampled_parts else pd.DataFrame()
+    # 3) Sample TRAIN ticker-by-ticker and fit the feature engineer without
+    #    materializing one giant concatenated training DataFrame.
+    print(f"[{exp_id}] Sampling train data for feature fitting...")
+    sampled_train_count = 0
+    df_fit_sampled = None
+    for dft_s in _iter_sampled_train_chunks(progress_desc="Sampling train chunks"):
+        sampled_train_count += int(len(dft_s))
+        if df_fit_sampled is None:
+            df_fit_sampled = dft_s
 
-    if len(df_fit_sampled) == 0:
+    if sampled_train_count == 0:
         raise RuntimeError(
             "No sampled training rows available to fit feature engineer. "
             "This usually means your sampler is too sparse or train data is empty."
         )
 
     # 4) Fit FE + labeler on sampled train
-    fe.fit(df_fit_sampled)
+    print(f"[{exp_id}] Fitting feature engineer and labeler...")
+    if hasattr(fe, "fit_many"):
+        fe.fit_many(_iter_sampled_train_chunks(progress_desc="FE fit chunks"))
+    else:
+        df_fit_sampled = pd.concat(list(_iter_sampled_train_chunks()), axis=0)
+        fe.fit(df_fit_sampled)
     labeler.fit(df_fit_sampled)
     # --------------------------------------------------------
     # Process each ticker on full history (train+val+test)
@@ -339,7 +368,8 @@ def prepare_experiment(
     # global diagnostics accumulator
     density_summary_rows: list[dict] = []
 
-    for t in tqdm.tqdm(tickers_all, desc="Preparing tickers"):
+    print(f"[{exp_id}] Preparing ticker artifacts...")
+    for t in tqdm.tqdm(tickers_all, desc="Preparing tickers", dynamic_ncols=True):
         df_full_raw = _concat_nonempty(
             [
                 ticker_dfs_train.get(t),
@@ -454,16 +484,14 @@ def prepare_experiment(
         save_ticker_artifacts(tickers_root / t, X, y, ts, meta, label_metadata=y_meta)
 
     # Persist global density summary
-    (exp_dir / "density_summary.json").write_text(
-        json.dumps(density_summary_rows, indent=2, default=_json_default)
-    )
+    (exp_dir / "density_summary.json").write_text(json.dumps(density_summary_rows, indent=2, default=_json_default))
 
     # --------------------------------------------------------
     # Build indices for train/val/test using inferred boundaries
     # --------------------------------------------------------
     def build_index_for_tickers(tickers: list[str], split: str) -> np.ndarray:
         out = []
-        for t in tickers:
+        for t in tqdm.tqdm(tickers, desc=f"Building {split} index", dynamic_ncols=True):
             ts = np.load(tickers_root / t / "timestamps.npy", mmap_mode="r")
             valid_pos = valid_pos_by_ticker[t]
             tid = ticker_id[t]
@@ -485,6 +513,7 @@ def prepare_experiment(
     np.save(exp_dir / "index_val.npy", index_val)
     np.save(exp_dir / "index_test.npy", index_test)
 
+    print(f"[{exp_id}] Finished preparing experiment.")
     print("Prepared indices:")
     print("  train:", len(index_train))
     print("  val:", len(index_val))
@@ -499,8 +528,7 @@ def prepare_experiment(
     )
 
 
-
-def prepare_single_dataset(dataset_split : DownloadedDatasetSplit, sampler, feature_engineer, labeler, L=64):
+def prepare_single_dataset(dataset_split: DownloadedDatasetSplit, sampler, feature_engineer, labeler, L=64):
     ticker_data_train, ticker_data_val, ticker_data_test = get_ticker_data(dataset_split)
 
     # sampler = IdentitySampler(subsample_every=1)
@@ -527,6 +555,7 @@ def prepare_single_dataset(dataset_split : DownloadedDatasetSplit, sampler, feat
     )
     print("Experiment prepared at:", prepared.exp_dir)
     return prepared
+
 
 # ============================================================
 # 6) Minimal runnable main (plug in your data loader)
@@ -556,10 +585,7 @@ def main():
         )
         fe = StandardizedFeatures(base=base_fe)
         labeler = TripleBarrierLabeler(
-            name=label,
-            width_minutes=width,
-            height=height_pct / 100,
-            drop_time_exit_label=False
+            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=False
         )
 
         cfg = ExperimentConfig(

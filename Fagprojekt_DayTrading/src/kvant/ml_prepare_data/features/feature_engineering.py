@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Protocol, Tuple, Dict
+from typing import Iterable, Optional, Protocol, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,9 +16,15 @@ from kvant.ml_prepare_data.dataset_preparation_utils import ensure_utc_sorted_in
 # ---------------------------------------------------------------------
 class FeatureEngineer(Protocol):
     name: str
-    def fit(self, df: pd.DataFrame) -> "FeatureEngineer": ...
-    def transform(self, df: pd.DataFrame) -> tuple[np.ndarray, list[str]]: ...
-    def get_meta(self) -> dict: ...
+
+    def fit(self, df: pd.DataFrame) -> "FeatureEngineer":
+        ...
+
+    def transform(self, df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
+        ...
+
+    def get_meta(self) -> dict:
+        ...
 
 
 # ---------------------------------------------------------------------
@@ -30,6 +36,7 @@ class BaseDFEngineer:
     Subclasses implement _transform_df -> pd.DataFrame of numeric features.
     This keeps feature name bookkeeping and scaling straightforward.
     """
+
     name: str = "base_df_eng"
     fillna_value: Optional[float] = 0.0  # None => keep NaN
 
@@ -86,6 +93,7 @@ class IntradayTA10Features(BaseDFEngineer):
     Implements the 10 feature groups described in the paper’s feature engineering section
     (computed after sampling) .
     """
+
     name: str = "intraday_ta10"
 
     cols: Tuple[str, ...] = ("open", "high", "low", "close", "volume")
@@ -134,7 +142,7 @@ class IntradayTA10Features(BaseDFEngineer):
         # Core series
         o = x["open"].astype(float)
         h = x["high"].astype(float)
-        l = x["low"].astype(float)
+        low = x["low"].astype(float)
         c = x["close"].astype(float)
         v_raw = x["volume"].astype(float)
 
@@ -143,7 +151,7 @@ class IntradayTA10Features(BaseDFEngineer):
         # Base OHLC
         feat["open"] = o
         feat["high"] = h
-        feat["low"] = l
+        feat["low"] = low
         feat["close"] = c
 
         # Volume feature column (raw or log1p), but use RAW volume in CMF/MFI formulas
@@ -183,7 +191,7 @@ class IntradayTA10Features(BaseDFEngineer):
         # 4) Stochastic Oscillator %K, %D (lookback=14, d=3)
         n_stoch = self._scale(14)
         n_d = self._scale(3)
-        low_n = l.rolling(window=n_stoch, min_periods=n_stoch).min()
+        low_n = low.rolling(window=n_stoch, min_periods=n_stoch).min()
         high_n = h.rolling(window=n_stoch, min_periods=n_stoch).max()
         stoch_k = 100.0 * self._safe_div((c - low_n), (high_n - low_n))
         stoch_d = stoch_k.rolling(window=n_d, min_periods=n_d).mean()
@@ -207,7 +215,7 @@ class IntradayTA10Features(BaseDFEngineer):
 
         # 8) CMF period=21
         n_cmf = self._scale(21)
-        mf_mult = self._safe_div(((c - l) - (h - c)), (h - l))
+        mf_mult = self._safe_div(((c - low) - (h - c)), (h - low))
         mf_vol = mf_mult * v_raw
         feat["cmf_21"] = self._safe_div(
             mf_vol.rolling(window=n_cmf, min_periods=n_cmf).sum(),
@@ -216,7 +224,7 @@ class IntradayTA10Features(BaseDFEngineer):
 
         # 9) MFI period=14
         n_mfi = self._scale(14)
-        tp = (h + l + c) / 3.0
+        tp = (h + low + c) / 3.0
         raw_mf = tp * v_raw
         tp_delta = tp.diff()
         pos_mf = raw_mf.where(tp_delta > 0.0, 0.0)
@@ -254,6 +262,7 @@ class StandardizedFeatures:
 
     This matches the paper’s scaling step .
     """
+
     base: BaseDFEngineer
     name: str = "standardized"
     eps: float = 1e-12
@@ -261,12 +270,56 @@ class StandardizedFeatures:
     mean_: Optional[np.ndarray] = field(default=None, init=False, repr=False)
     std_: Optional[np.ndarray] = field(default=None, init=False, repr=False)
     feature_names_: Optional[list[str]] = field(default=None, init=False, repr=False)
+    n_samples_seen_: Optional[np.ndarray] = field(default=None, init=False, repr=False)
+    sum_: Optional[np.ndarray] = field(default=None, init=False, repr=False)
+    sumsq_: Optional[np.ndarray] = field(default=None, init=False, repr=False)
 
     def fit(self, df: pd.DataFrame) -> "StandardizedFeatures":
-        X, names = self.base.transform(df)
-        self.feature_names_ = names
-        mu = np.nanmean(X, axis=0)
-        sd = np.nanstd(X, axis=0)
+        return self.fit_many([df])
+
+    def fit_many(self, dfs: Iterable[pd.DataFrame]) -> "StandardizedFeatures":
+        self.feature_names_ = None
+        self.n_samples_seen_ = None
+        self.sum_ = None
+        self.sumsq_ = None
+        self.mean_ = None
+        self.std_ = None
+
+        for df in dfs:
+            if df is None or len(df) == 0:
+                continue
+            X, names = self.base.transform(df)
+            if self.feature_names_ is None:
+                self.feature_names_ = names
+            elif names != self.feature_names_:
+                raise RuntimeError("Feature names changed between fit chunks.")
+
+            x64 = X.astype(np.float64, copy=False)
+            chunk_sum = np.nansum(x64, axis=0)
+            chunk_sumsq = np.nansum(np.square(x64), axis=0)
+            valid_counts = np.sum(~np.isnan(x64), axis=0, dtype=np.int64)
+
+            if self.sum_ is None:
+                self.sum_ = chunk_sum
+                self.sumsq_ = chunk_sumsq
+                counts = valid_counts
+            else:
+                self.sum_ += chunk_sum
+                self.sumsq_ += chunk_sumsq
+                counts = self.n_samples_seen_ + valid_counts
+
+            if np.any(counts == 0):
+                raise RuntimeError("Encountered a feature column with no finite values during standardization fit.")
+
+            self.n_samples_seen_ = counts
+
+        if self.feature_names_ is None or self.sum_ is None or self.sumsq_ is None:
+            raise RuntimeError("No rows available to fit StandardizedFeatures.")
+
+        counts = self.n_samples_seen_.astype(np.float64, copy=False)
+        mu = self.sum_ / counts
+        var = np.maximum(self.sumsq_ / counts - np.square(mu), 0.0)
+        sd = np.sqrt(var)
         sd = np.where(sd < self.eps, 1.0, sd)
         self.mean_ = mu.astype(np.float32)
         self.std_ = sd.astype(np.float32)
@@ -278,6 +331,7 @@ class StandardizedFeatures:
             "base": self.base.get_meta(),
             "eps": float(self.eps),
             "n_features": None if self.feature_names_ is None else int(len(self.feature_names_)),
+            "n_samples_seen": None if self.n_samples_seen_ is None else int(np.max(self.n_samples_seen_)),
         }
 
     def transform(self, df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:

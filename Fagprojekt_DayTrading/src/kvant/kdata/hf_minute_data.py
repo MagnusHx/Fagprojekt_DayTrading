@@ -324,6 +324,10 @@ def get_huggingface_top_20_normal_splits():
     return get_huggingface_top_n_tiny_splits(n=20, warmup_quarters=16)
 
 
+def get_huggingface_top_200_normal_splits():
+    return get_huggingface_top_n_tiny_splits(n=200, warmup_quarters=16)
+
+
 def get_huggingface_top_10_tiny_splits():
     return get_huggingface_top_n_tiny_splits(n=10, warmup_quarters=2)
 
@@ -511,7 +515,7 @@ if __name__ == "__main__":
     fig = plot_triple_bar_first_n(df, ticker_name=ticker, n=3000, width=120, height=0.02)
     backend = plt.get_backend().lower()
     if "agg" in backend:
-        out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "artifacts"))
+        out_dir = os.path.abspath(os.path.join(os.getcwd(), "artifacts"))
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, "triple_bar_labels.png")
         fig.savefig(out_path, dpi=150)

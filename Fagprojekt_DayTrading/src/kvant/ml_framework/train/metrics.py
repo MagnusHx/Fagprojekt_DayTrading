@@ -4,12 +4,44 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+
 
 def classification_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, Any]:
+    """Compute aggregate, per-class, and class-distribution metrics."""
     if len(y_true) == 0:
         return {"accuracy": 0.0}
-    return {"accuracy": float(accuracy_score(y_true, y_pred))}
+
+    labels = np.asarray([0, 1, 2], dtype=np.int64)
+    precision, recall, f1, support = precision_recall_fscore_support(
+        y_true,
+        y_pred,
+        labels=labels,
+        zero_division=0,
+    )
+
+    out: Dict[str, Any] = {
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "precision_macro": float(np.mean(precision)),
+        "recall_macro": float(np.mean(recall)),
+        "f1_macro": float(np.mean(f1)),
+    }
+
+    y_true_counts = np.bincount(y_true.astype(np.int64, copy=False), minlength=len(labels))
+    y_pred_counts = np.bincount(y_pred.astype(np.int64, copy=False), minlength=len(labels))
+    n_total = max(int(len(y_true)), 1)
+
+    for idx, label in enumerate(labels):
+        out[f"precision_class_{label}"] = float(precision[idx])
+        out[f"recall_class_{label}"] = float(recall[idx])
+        out[f"f1_class_{label}"] = float(f1[idx])
+        out[f"support_class_{label}"] = int(support[idx])
+        out[f"y_true_count_class_{label}"] = int(y_true_counts[idx])
+        out[f"y_pred_count_class_{label}"] = int(y_pred_counts[idx])
+        out[f"y_true_pct_class_{label}"] = float(y_true_counts[idx] / n_total)
+        out[f"y_pred_pct_class_{label}"] = float(y_pred_counts[idx] / n_total)
+
+    return out
 
 
 def per_ticker_trade_stats(
@@ -108,7 +140,6 @@ def compute_return_stats(
     return out
 
 
-
 def compute_action_profit_stats(
     *,
     y_pred: np.ndarray,
@@ -137,7 +168,7 @@ def compute_action_profit_stats(
     assert len(y_pred) == len(metas) == len(tids)
 
     # accumulate signed pnl fractions
-    buy_pnls = defaultdict(list)    # tid -> list[pnl_frac]
+    buy_pnls = defaultdict(list)  # tid -> list[pnl_frac]
     short_pnls = defaultdict(list)  # tid -> list[-pnl_frac]
 
     for i in range(len(y_pred)):
@@ -168,10 +199,58 @@ def compute_action_profit_stats(
             "buy/n_trades": int(len(b)),
             "buy/profit_pct/avg_per_trade": float(np.mean(b) * 100.0) if len(b) else float("nan"),
             "buy/profit_pct/total": float(np.sum(b) * 100.0) if len(b) else 0.0,
-
             "short/n_trades": int(len(s)),
             "short/profit_pct/avg_per_trade": float(np.mean(s) * 100.0) if len(s) else float("nan"),
             "short/profit_pct/total": float(np.sum(s) * 100.0) if len(s) else 0.0,
         }
 
     return out
+
+
+def compute_profit_curve_over_trades(
+    *,
+    y_pred: np.ndarray,
+    metas: List[Optional[dict]],
+) -> Dict[str, List[float]]:
+    """
+    Compute the cumulative profit curve over executed trades.
+
+    A trade is counted only when the prediction is buy/short (2 or 0) and the
+    sample metadata contains a numeric ``pnl_fraction`` value.
+
+    Returns:
+      Dict containing:
+        trade_number:
+          One-based trade indices.
+        trade_profit_pct:
+          Signed profit for each trade in percent.
+        cum_profit_pct:
+          Cumulative signed profit in percent.
+    """
+    assert len(y_pred) == len(metas)
+
+    trade_profit_pct: List[float] = []
+
+    for yp, meta in zip(y_pred, metas):
+        if meta is None:
+            continue
+
+        yp = int(yp)
+        if yp not in (0, 2):
+            continue
+
+        pnl_frac = meta.get("pnl_fraction", None)
+        if not isinstance(pnl_frac, (int, float)):
+            continue
+
+        signed_profit_pct = (float(pnl_frac) if yp == 2 else -float(pnl_frac)) * 100.0
+        trade_profit_pct.append(signed_profit_pct)
+
+    cum_profit_pct = np.cumsum(np.asarray(trade_profit_pct, dtype=np.float64)).tolist()
+    trade_number = list(range(1, len(trade_profit_pct) + 1))
+
+    return {
+        "trade_number": trade_number,
+        "trade_profit_pct": trade_profit_pct,
+        "cum_profit_pct": cum_profit_pct,
+    }

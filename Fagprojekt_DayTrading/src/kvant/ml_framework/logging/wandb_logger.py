@@ -75,6 +75,20 @@ def _plot_confusion_heatmap(cm: np.ndarray, title: str) -> plt.Figure:
     return fig
 
 
+def _normalized_confusion_table(cm: np.ndarray) -> wandb.Table:
+    """Create a row-normalized confusion-matrix table for W&B."""
+    cm = np.asarray(cm, dtype=np.float64)
+    row_sums = cm.sum(axis=1, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cm_norm = np.where(row_sums > 0, cm / row_sums, 0.0)
+
+    table = wandb.Table(columns=["true_class", "pred_class", "count", "row_normalized"])
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            table.add_data(int(i), int(j), int(cm[i, j]), float(cm_norm[i, j]))
+    return table
+
+
 def _safe_pct(num: float, den: float) -> float:
     return 0.0 if den == 0 else float(num) / float(den)
 
@@ -99,10 +113,9 @@ def _plot_split_class_balance(split_stats: Dict[str, dict]) -> plt.Figure:
     cls_labels = [CLASS_NAMES[c] for c in cls_ids]
     x = np.arange(len(splits))
 
-    counts = np.array([
-        [int((split_stats[s].get("y_counts", {}) or {}).get(c, 0)) for s in splits]
-        for c in cls_ids
-    ], dtype=np.float64)
+    counts = np.array(
+        [[int((split_stats[s].get("y_counts", {}) or {}).get(c, 0)) for s in splits] for c in cls_ids], dtype=np.float64
+    )
     totals = counts.sum(axis=0, keepdims=True)
     with np.errstate(divide="ignore", invalid="ignore"):
         shares = np.where(totals > 0, counts / totals, 0.0)
@@ -150,7 +163,6 @@ def _plot_split_time_ranges(split_stats: Dict[str, dict]) -> plt.Figure:
 
     colors = {"train": "#4C956C", "val": "#F4A259", "test": "#BC4B51"}
     y = np.arange(len(rows))
-    left = np.array([r[1].to_pydatetime() for r in rows], dtype=object)
     widths = np.array([(r[2] - r[1]).total_seconds() / 86400.0 for r in rows], dtype=float)
 
     for i, (split, start, end) in enumerate(rows):
@@ -241,12 +253,13 @@ def _plot_density_summary(density_rows: List[dict]) -> plt.Figure:
 
     retention = np.array([float(r.get("retention_ratio", np.nan)) for r in density_rows], dtype=float)
     bpd = np.array([float(r.get("bars_per_day_sampled", np.nan)) for r in density_rows], dtype=float)
-    hvals = np.array([
-        float((r.get("sampler_ticker_meta", {}) or {}).get("h", np.nan))
-        for r in density_rows
-    ], dtype=float)
+    hvals = np.array(
+        [float((r.get("sampler_ticker_meta", {}) or {}).get("h", np.nan)) for r in density_rows], dtype=float
+    )
 
-    axes[0].hist(retention[np.isfinite(retention)], bins=min(20, max(5, len(density_rows))), color="#4C956C", edgecolor="black")
+    axes[0].hist(
+        retention[np.isfinite(retention)], bins=min(20, max(5, len(density_rows))), color="#4C956C", edgecolor="black"
+    )
     axes[0].set_title("Retention ratio across tickers")
     axes[0].set_xlabel("sampled/raw")
     axes[0].set_ylabel("tickers")
@@ -315,9 +328,7 @@ class WandbLogger:
 
         # split distribution table (static)
         # (Assumes ds.summary exists; if you truly want to use ds.display instead, tell me what it returns.)
-        dist_table = wandb.Table(
-            columns=["split", "n", "first_ts", "last_ts", "y_count_0", "y_count_1", "y_count_2"]
-        )
+        dist_table = wandb.Table(columns=["split", "n", "first_ts", "last_ts", "y_count_0", "y_count_1", "y_count_2"])
         split_stats: Dict[str, dict] = {}
         per_ticker_balance_rows: List[dict] = []
         for split, loader in loaders.items():
@@ -361,16 +372,34 @@ class WandbLogger:
 
         balance_table = wandb.Table(
             columns=[
-                "split", "ticker", "tid", "n", "first_ts", "last_ts",
-                "y_count_0", "y_count_1", "y_count_2",
-                "y_pct_0", "y_pct_1", "y_pct_2",
+                "split",
+                "ticker",
+                "tid",
+                "n",
+                "first_ts",
+                "last_ts",
+                "y_count_0",
+                "y_count_1",
+                "y_count_2",
+                "y_pct_0",
+                "y_pct_1",
+                "y_pct_2",
             ]
         )
         for row in per_ticker_balance_rows:
             balance_table.add_data(
-                row["split"], row["ticker"], row["tid"], row["n"], row["first_ts"], row["last_ts"],
-                row["y_count_0"], row["y_count_1"], row["y_count_2"],
-                row["y_pct_0"], row["y_pct_1"], row["y_pct_2"],
+                row["split"],
+                row["ticker"],
+                row["tid"],
+                row["n"],
+                row["first_ts"],
+                row["last_ts"],
+                row["y_count_0"],
+                row["y_count_1"],
+                row["y_count_2"],
+                row["y_pct_0"],
+                row["y_pct_1"],
+                row["y_pct_2"],
             )
         wandb.log({"data/per_ticker_class_balance": balance_table})
 
@@ -394,10 +423,19 @@ class WandbLogger:
         if density_rows:
             density_table = wandb.Table(
                 columns=[
-                    "ticker", "n_raw_full", "n_sampled_full", "retention_ratio",
-                    "bars_per_day_raw", "bars_per_day_sampled", "h",
-                    "raw_train", "raw_val", "raw_test",
-                    "sampled_train", "sampled_val", "sampled_test",
+                    "ticker",
+                    "n_raw_full",
+                    "n_sampled_full",
+                    "retention_ratio",
+                    "bars_per_day_raw",
+                    "bars_per_day_sampled",
+                    "h",
+                    "raw_train",
+                    "raw_val",
+                    "raw_test",
+                    "sampled_train",
+                    "sampled_val",
+                    "sampled_test",
                 ]
             )
             for row in density_rows:
@@ -428,6 +466,7 @@ class WandbLogger:
     def log(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
         per_ticker_rows = metrics.pop("_per_ticker_rows", None)
         confusion_counts = metrics.pop("_confusion_counts", None)
+        profit_curves = metrics.pop("_profit_curves", None)
 
         # log scalars
         wandb.log(metrics, step=step)
@@ -442,7 +481,37 @@ class WandbLogger:
                     continue
                 fig = _plot_confusion_heatmap(np.asarray(cm), title=f"Confusion matrix ({split})")
                 wandb.log({f"charts/confusion_matrix/{split}": wandb.Image(fig)}, step=step)
+                wandb.log(
+                    {f"perf/confusion_matrix_normalized/{split}": _normalized_confusion_table(np.asarray(cm))},
+                    step=step,
+                )
                 plt.close(fig)
+
+        if isinstance(profit_curves, list):
+            for curve in profit_curves:
+                split = str(curve.get("split", "unknown"))
+                trade_numbers = curve.get("trade_number", [])
+                trade_profit_pct = curve.get("trade_profit_pct", [])
+                cum_profit_pct = curve.get("cum_profit_pct", [])
+                if not trade_numbers:
+                    continue
+
+                table = wandb.Table(columns=["trade_number", "trade_profit_pct", "cum_profit_pct"])
+                for trade_number, trade_profit, cum_profit in zip(trade_numbers, trade_profit_pct, cum_profit_pct):
+                    table.add_data(int(trade_number), float(trade_profit), float(cum_profit))
+
+                wandb.log({f"perf/profit_curve_over_trades/{split}": table}, step=step)
+                wandb.log(
+                    {
+                        f"charts/profit_over_trades/{split}": wandb.plot.line(
+                            table,
+                            "trade_number",
+                            "cum_profit_pct",
+                            title=f"Cumulative profit over trades ({split})",
+                        )
+                    },
+                    step=step,
+                )
 
         if not per_ticker_rows:
             return
@@ -450,10 +519,19 @@ class WandbLogger:
         # 1) long-form per-ticker table
         table = wandb.Table(
             columns=[
-                "epoch", "split", "tid", "ticker", "ticker_label",
-                "acc", "n",
-                "buy_n_trades", "buy_profit_avg_per_trade_pct", "buy_profit_total_pct",
-                "short_n_trades", "short_profit_avg_per_trade_pct", "short_profit_total_pct",
+                "epoch",
+                "split",
+                "tid",
+                "ticker",
+                "ticker_label",
+                "acc",
+                "n",
+                "buy_n_trades",
+                "buy_profit_avg_per_trade_pct",
+                "buy_profit_total_pct",
+                "short_n_trades",
+                "short_profit_avg_per_trade_pct",
+                "short_profit_total_pct",
             ]
         )
 
@@ -479,10 +557,19 @@ class WandbLogger:
             short_total = _to_float_or_nan(r.get("short_profit_total_pct", 0.0))
 
             table.add_data(
-                epoch, split, tid, ticker, ticker_label,
-                acc, n,
-                buy_n_trades, buy_avg, buy_total,
-                short_n_trades, short_avg, short_total,
+                epoch,
+                split,
+                tid,
+                ticker,
+                ticker_label,
+                acc,
+                n,
+                buy_n_trades,
+                buy_avg,
+                buy_total,
+                short_n_trades,
+                short_avg,
+                short_total,
             )
 
             by_ticker[ticker_label][split] = {
@@ -508,19 +595,15 @@ class WandbLogger:
                     "acc_train": d.get("train", {}).get("acc", np.nan),
                     "acc_val": d.get("val", {}).get("acc", np.nan),
                     "acc_test": d.get("test", {}).get("acc", np.nan),
-
                     "buy_avg_train": d.get("train", {}).get("buy_avg", np.nan),
                     "buy_avg_val": d.get("val", {}).get("buy_avg", np.nan),
                     "buy_avg_test": d.get("test", {}).get("buy_avg", np.nan),
-
                     "short_avg_train": d.get("train", {}).get("short_avg", np.nan),
                     "short_avg_val": d.get("val", {}).get("short_avg", np.nan),
                     "short_avg_test": d.get("test", {}).get("short_avg", np.nan),
-
                     "buy_total_train": d.get("train", {}).get("buy_total", np.nan),
                     "buy_total_val": d.get("val", {}).get("buy_total", np.nan),
                     "buy_total_test": d.get("test", {}).get("buy_total", np.nan),
-
                     "short_total_train": d.get("train", {}).get("short_total", np.nan),
                     "short_total_val": d.get("val", {}).get("short_total", np.nan),
                     "short_total_test": d.get("test", {}).get("short_total", np.nan),
@@ -546,35 +629,45 @@ class WandbLogger:
 
             # Accuracy
             line_series(
-                "acc_train", "acc_val", "acc_test",
+                "acc_train",
+                "acc_val",
+                "acc_test",
                 f"Per-ticker accuracy: {ticker_label}",
                 f"charts/per_ticker/acc/{ticker_label}",
             )
 
             # Per-trade profit (buy-only)
             line_series(
-                "buy_avg_train", "buy_avg_val", "buy_avg_test",
+                "buy_avg_train",
+                "buy_avg_val",
+                "buy_avg_test",
                 f"Buy-only profit (% avg per trade): {ticker_label}",
                 f"charts/per_ticker/buy_profit_avg_per_trade_pct/{ticker_label}",
             )
 
             # Per-trade profit (short-only)
             line_series(
-                "short_avg_train", "short_avg_val", "short_avg_test",
+                "short_avg_train",
+                "short_avg_val",
+                "short_avg_test",
                 f"Short-only profit (% avg per trade): {ticker_label}",
                 f"charts/per_ticker/short_profit_avg_per_trade_pct/{ticker_label}",
             )
 
             # Total profit (buy-only)
             line_series(
-                "buy_total_train", "buy_total_val", "buy_total_test",
+                "buy_total_train",
+                "buy_total_val",
+                "buy_total_test",
                 f"Buy-only profit (% total): {ticker_label}",
                 f"charts/per_ticker/buy_profit_total_pct/{ticker_label}",
             )
 
             # Total profit (short-only)
             line_series(
-                "short_total_train", "short_total_val", "short_total_test",
+                "short_total_train",
+                "short_total_val",
+                "short_total_test",
                 f"Short-only profit (% total): {ticker_label}",
                 f"charts/per_ticker/short_profit_total_pct/{ticker_label}",
             )

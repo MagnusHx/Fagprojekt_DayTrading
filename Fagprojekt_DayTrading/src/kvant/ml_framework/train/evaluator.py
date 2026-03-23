@@ -10,7 +10,7 @@ from sklearn.metrics import confusion_matrix
 
 from kvant.ml_prepare_data.data_loading import PreparedStore
 from .predict import predict
-from .metrics import classification_metrics, compute_action_profit_stats
+from .metrics import classification_metrics, compute_action_profit_stats, compute_profit_curve_over_trades
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class ExperimentEvaluator:
         loader: DataLoader,
         *,
         step: Optional[int] = None,
-    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], np.ndarray]:
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], np.ndarray, Optional[Dict[str, Any]]]:
         pred_out = predict(model, loader, self.device)
         y_true = pred_out["y_true"]
         y_pred = pred_out["y_pred"]
@@ -61,15 +61,20 @@ class ExperimentEvaluator:
 
         # profit stats need metadata
         per_tid_profit: Dict[int, Dict[str, Any]] = {}
+        profit_curve: Optional[Dict[str, Any]] = None
         if self.cfg.compute_profit_stats:
             index = np.stack([tid, tpos], axis=1).astype(np.int32, copy=False)
             metas = self.store.metadata_for_index(index)
             per_tid_profit = compute_action_profit_stats(y_pred=y_pred, metas=metas, tids=tid)
+            profit_curve = {
+                "split": split,
+                "epoch": int(step) if step is not None else None,
+            } | compute_profit_curve_over_trades(y_pred=y_pred, metas=metas)
 
         # per-ticker accuracy (+ profit stats columns)
         if self.cfg.compute_per_ticker_accuracy:
             for t in np.unique(tid):
-                mask = (tid == t)
+                mask = tid == t
                 n_t = int(mask.sum())
                 acc_t = float((y_true[mask] == y_pred[mask]).mean()) if n_t > 0 else 0.0
 
@@ -84,12 +89,10 @@ class ExperimentEvaluator:
                         "ticker": str(ticker),
                         "acc": acc_t,
                         "n": n_t,
-
                         # buy-only
                         "buy_n_trades": int(p.get("buy/n_trades", 0)),
                         "buy_profit_avg_per_trade_pct": float(p.get("buy/profit_pct/avg_per_trade", float("nan"))),
                         "buy_profit_total_pct": float(p.get("buy/profit_pct/total", 0.0)),
-
                         # short-only
                         "short_n_trades": int(p.get("short/n_trades", 0)),
                         "short_profit_avg_per_trade_pct": float(p.get("short/profit_pct/avg_per_trade", float("nan"))),
@@ -97,7 +100,7 @@ class ExperimentEvaluator:
                     }
                 )
 
-        return metrics, per_ticker_rows, cm
+        return metrics, per_ticker_rows, cm, profit_curve
 
     def evaluate_all(
         self,
@@ -107,8 +110,8 @@ class ExperimentEvaluator:
         step: Optional[int] = None,
     ) -> Dict[str, Any]:
         all_metrics: Dict[str, Any] = {}
-        all_rows: List[Dict[str, Any]] = {}
         confusion_counts: Dict[str, np.ndarray] = {}
+        profit_curves: List[Dict[str, Any]] = []
 
         rows_out: List[Dict[str, Any]] = []
 
@@ -116,16 +119,16 @@ class ExperimentEvaluator:
             if loader is None or len(loader.dataset) == 0:
                 continue
 
-            m, rows, cm = self.evaluate_split(split, model, loader, step=step)
+            m, rows, cm, profit_curve = self.evaluate_split(split, model, loader, step=step)
             all_metrics.update(m)
             rows_out.extend(rows)
             confusion_counts[split] = cm
+            if profit_curve is not None:
+                profit_curves.append(profit_curve)
 
         # special payloads for logger
         all_metrics["_per_ticker_rows"] = rows_out
         all_metrics["_confusion_counts"] = confusion_counts
-
-        if self.logger is not None:
-            self.logger.log(all_metrics, step=step)
+        all_metrics["_profit_curves"] = profit_curves
 
         return all_metrics
