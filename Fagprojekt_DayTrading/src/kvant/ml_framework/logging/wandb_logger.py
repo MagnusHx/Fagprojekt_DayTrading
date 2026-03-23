@@ -284,6 +284,9 @@ def _load_density_summary(exp_dir: Path) -> List[dict]:
 
 
 class WandbLogger:
+    _SETUP_STEP = 0
+    _SHARED_AXIS_KEYS = {"epoch", "global_epoch"}
+
     def __init__(
         self,
         *,
@@ -291,14 +294,38 @@ class WandbLogger:
         name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         api_timeout: int = 29,
+        run: Optional[Any] = None,
+        namespace: Optional[str] = None,
+        step_offset: int = 0,
+        manage_run: bool = True,
         **init_kwargs,
     ):
-        self.run = wandb.init(project=project, name=name, config=config or {}, **init_kwargs)
+        self.run = run or wandb.init(project=project, name=name, config=config or {}, **init_kwargs)
         self.api = wandb.Api(timeout=int(api_timeout))
+        self.api_timeout = int(api_timeout)
+        self.namespace = str(namespace).strip("/") if namespace else ""
+        self.step_offset = int(step_offset)
+        self.manage_run = bool(manage_run)
 
         # ticker_label -> list of epoch dicts
         self._ticker_history: Dict[str, List[Dict[str, Any]]] = {}
         self._tickers_to_chart: List[str] = []
+        self._define_default_metrics()
+
+    def _define_default_metrics(self) -> None:
+        wandb.define_metric("global_epoch")
+        wandb.define_metric("epoch")
+
+    def child(self, *, namespace: str, step_offset: int = 0) -> WandbLogger:
+        return WandbLogger(
+            project=self.run.project,
+            name=self.run.name,
+            api_timeout=self.api_timeout,
+            run=self.run,
+            namespace=self._qualify_key(namespace),
+            step_offset=self.step_offset + int(step_offset),
+            manage_run=False,
+        )
 
     def log_config(self, cfg: Any) -> None:
         if is_dataclass(cfg):
@@ -306,20 +333,43 @@ class WandbLogger:
         elif isinstance(cfg, dict):
             wandb.config.update(cfg, allow_val_change=True)
 
+    def _qualify_key(self, key: str) -> str:
+        if not self.namespace:
+            return key
+        return f"{self.namespace}/{key}"
+
+    def _qualify_metrics(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        qualified: Dict[str, Any] = {}
+        for key, value in metrics.items():
+            key_str = str(key)
+            if key_str in self._SHARED_AXIS_KEYS:
+                qualified[key_str] = value
+            else:
+                qualified[self._qualify_key(key_str)] = value
+        return qualified
+
+    def _normalize_step(self, step: Optional[int]) -> Optional[int]:
+        if step is None:
+            return None
+        return self.step_offset + int(step)
+
+    def _log_static(self, metrics: Dict[str, Any]) -> None:
+        wandb.log(self._qualify_metrics(metrics), step=self._normalize_step(self._SETUP_STEP))
+
     def setup(self, *, exp: Any, loaders: Dict[str, Any]) -> None:
         # label meanings
         self.run.config.update({"label_meanings": LABEL_MEANINGS}, allow_val_change=True)
         label_table = wandb.Table(columns=["y", "meaning"])
         for y, meaning in LABEL_MEANINGS.items():
             label_table.add_data(int(y), str(meaning))
-        wandb.log({"data/label_meanings": label_table})
+        self._log_static({"data/label_meanings": label_table})
 
         # tickers mapping
         tickers = getattr(exp.store, "tickers_all", None) or []
         ticker_table = wandb.Table(columns=["tid", "ticker", "ticker_label"])
         for tid, tkr in enumerate(tickers):
             ticker_table.add_data(int(tid), str(tkr), f"{tkr} (tid={tid})")
-        wandb.log({"data/tickers": ticker_table})
+        self._log_static({"data/tickers": ticker_table})
 
         # first 10 tickers (or fewer)
         n_chart = min(10, len(tickers))
@@ -368,7 +418,7 @@ class WandbLogger:
                         "y_pct_2": _safe_pct(_safe_int(yct.get(2, 0)), n),
                     }
                 )
-        wandb.log({"data/split_distribution": dist_table})
+        self._log_static({"data/split_distribution": dist_table})
 
         balance_table = wandb.Table(
             columns=[
@@ -401,22 +451,22 @@ class WandbLogger:
                 row["y_pct_1"],
                 row["y_pct_2"],
             )
-        wandb.log({"data/per_ticker_class_balance": balance_table})
+        self._log_static({"data/per_ticker_class_balance": balance_table})
 
         fig = _plot_split_class_balance(split_stats)
-        wandb.log({"charts/data/class_balance_by_split": wandb.Image(fig)})
+        self._log_static({"charts/data/class_balance_by_split": wandb.Image(fig)})
         plt.close(fig)
 
         fig = _plot_split_time_ranges(split_stats)
-        wandb.log({"charts/data/split_time_ranges": wandb.Image(fig)})
+        self._log_static({"charts/data/split_time_ranges": wandb.Image(fig)})
         plt.close(fig)
 
         fig = _plot_split_expansion(split_stats)
-        wandb.log({"charts/data/split_expansion": wandb.Image(fig)})
+        self._log_static({"charts/data/split_expansion": wandb.Image(fig)})
         plt.close(fig)
 
         fig = _plot_top_ticker_class_balance([r for r in per_ticker_balance_rows if r["split"] == "train"])
-        wandb.log({"charts/data/top_ticker_train_class_balance": wandb.Image(fig)})
+        self._log_static({"charts/data/top_ticker_train_class_balance": wandb.Image(fig)})
         plt.close(fig)
 
         density_rows = _load_density_summary(Path(exp.exp_dir))
@@ -457,19 +507,26 @@ class WandbLogger:
                     _safe_int(sampled_split.get("val", 0)),
                     _safe_int(sampled_split.get("test", 0)),
                 )
-            wandb.log({"data/sampling_density": density_table})
+            self._log_static({"data/sampling_density": density_table})
 
             fig = _plot_density_summary(density_rows)
-            wandb.log({"charts/data/sampling_density_summary": wandb.Image(fig)})
+            self._log_static({"charts/data/sampling_density_summary": wandb.Image(fig)})
             plt.close(fig)
 
     def log(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
         per_ticker_rows = metrics.pop("_per_ticker_rows", None)
         confusion_counts = metrics.pop("_confusion_counts", None)
         profit_curves = metrics.pop("_profit_curves", None)
+        local_step = None if step is None else int(step)
+        step = self._normalize_step(step)
+
+        if local_step is not None:
+            metrics.setdefault("epoch", local_step)
+        if step is not None:
+            metrics.setdefault("global_epoch", int(step))
 
         # log scalars
-        wandb.log(metrics, step=step)
+        wandb.log(self._qualify_metrics(metrics), step=step)
 
         if step is None:
             return
@@ -480,9 +537,9 @@ class WandbLogger:
                 if cm is None:
                     continue
                 fig = _plot_confusion_heatmap(np.asarray(cm), title=f"Confusion matrix ({split})")
-                wandb.log({f"charts/confusion_matrix/{split}": wandb.Image(fig)}, step=step)
+                wandb.log({self._qualify_key(f"charts/confusion_matrix/{split}"): wandb.Image(fig)}, step=step)
                 wandb.log(
-                    {f"perf/confusion_matrix_normalized/{split}": _normalized_confusion_table(np.asarray(cm))},
+                    {self._qualify_key(f"perf/confusion_matrix_normalized/{split}"): _normalized_confusion_table(np.asarray(cm))},
                     step=step,
                 )
                 plt.close(fig)
@@ -500,10 +557,10 @@ class WandbLogger:
                 for trade_number, trade_profit, cum_profit in zip(trade_numbers, trade_profit_pct, cum_profit_pct):
                     table.add_data(int(trade_number), float(trade_profit), float(cum_profit))
 
-                wandb.log({f"perf/profit_curve_over_trades/{split}": table}, step=step)
+                wandb.log({self._qualify_key(f"perf/profit_curve_over_trades/{split}"): table}, step=step)
                 wandb.log(
                     {
-                        f"charts/profit_over_trades/{split}": wandb.plot.line(
+                        self._qualify_key(f"charts/profit_over_trades/{split}"): wandb.plot.line(
                             table,
                             "trade_number",
                             "cum_profit_pct",
@@ -539,7 +596,7 @@ class WandbLogger:
         by_ticker = defaultdict(lambda: defaultdict(dict))
 
         for r in per_ticker_rows:
-            epoch = int(r.get("epoch", step) or step)
+            epoch = int(r.get("epoch", local_step) or local_step or 0)
             split = str(r["split"])
             tid = int(r["tid"])
             ticker = str(r["ticker"])
@@ -580,7 +637,7 @@ class WandbLogger:
                 "short_total": short_total,
             }
 
-        wandb.log({"perf/per_ticker_table": table}, step=step)
+        wandb.log({self._qualify_key("perf/per_ticker_table"): table}, step=step)
 
         # 2) charts for first 10 tickers (train/val/test lines)
         for ticker_label in self._tickers_to_chart:
@@ -591,7 +648,7 @@ class WandbLogger:
             hist = self._ticker_history.setdefault(ticker_label, [])
             hist.append(
                 {
-                    "epoch": int(step),
+                    "epoch": int(local_step or 0),
                     "acc_train": d.get("train", {}).get("acc", np.nan),
                     "acc_val": d.get("val", {}).get("acc", np.nan),
                     "acc_test": d.get("test", {}).get("acc", np.nan),
@@ -625,7 +682,7 @@ class WandbLogger:
                     xname="epoch",
                     split_table=True,
                 )
-                wandb.log({chart_key: chart}, step=step)
+                wandb.log({self._qualify_key(chart_key): chart}, step=step)
 
             # Accuracy
             line_series(
@@ -673,4 +730,5 @@ class WandbLogger:
             )
 
     def stop(self) -> None:
-        self.run.finish()
+        if self.manage_run:
+            self.run.finish()

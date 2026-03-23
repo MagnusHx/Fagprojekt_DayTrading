@@ -60,7 +60,37 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def run_single_fold(args: argparse.Namespace, exp_dir: Path, fold_tag: str | None = None) -> float:
+def _make_logger(
+    args: argparse.Namespace,
+    *,
+    exp_dir: Path,
+    fold_tag: str | None = None,
+) -> WandbLogger:
+    return WandbLogger(
+        project=project,
+        entity=entity,
+        name=(args.wandb_name or "stocks-run") if fold_tag is None else f"{(args.wandb_name or 'stocks-run')}-{fold_tag}",
+        api_timeout=args.wandb_api_timeout,
+        config={
+            "exp_dir": str(exp_dir),
+            "fold_tag": fold_tag,
+            "epochs": args.epochs,
+            "lr": args.lr,
+            "weight_decay": args.weight_decay,
+            "L": None,
+            "train_batch_size": args.train_batch_size,
+            "eval_batch_size": args.eval_batch_size,
+            "class_weights": None,
+        },
+    )
+
+
+def run_single_fold(
+    args: argparse.Namespace,
+    exp_dir: Path,
+    fold_tag: str | None = None,
+    logger: WandbLogger | None = None,
+) -> float:
     exp = PreparedExperiment(exp_dir)
     dl_train, dl_val, dl_test = exp.get_loaders(
         train_batch_size=args.train_batch_size,
@@ -81,8 +111,8 @@ def run_single_fold(args: argparse.Namespace, exp_dir: Path, fold_tag: str | Non
     # Optional local sanity check
     ds_train, ds_val, ds_test = exp.get_datasets()
 
-    for ds, l in [(ds_train, "train"), (ds_val, "val"), (ds_test, "test")]:
-        print(f"Dataset {l}")
+    for ds, split_name in [(ds_train, "train"), (ds_val, "val"), (ds_test, "test")]:
+        print(f"Dataset {split_name}")
         ds.summary(display=True)
         print("-"*10,"\n")
 
@@ -95,23 +125,22 @@ def run_single_fold(args: argparse.Namespace, exp_dir: Path, fold_tag: str | Non
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(w, device=device))
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    logger = WandbLogger(
-        project=project,
-        entity=entity,
-        name=(args.wandb_name or "stocks-run") if fold_tag is None else f"{(args.wandb_name or 'stocks-run')}-{fold_tag}",
-        api_timeout=args.wandb_api_timeout,
-        config={
-            "exp_dir": str(exp_dir),
-            "fold_tag": fold_tag,
-            "epochs": args.epochs,
-            "lr": args.lr,
-            "weight_decay": args.weight_decay,
-            "L": exp.L,
-            "train_batch_size": args.train_batch_size,
-            "eval_batch_size": args.eval_batch_size,
-            "class_weights": w.tolist(),
-        },
-    )
+    owns_logger = logger is None
+    logger = logger or _make_logger(args, exp_dir=exp_dir, fold_tag=fold_tag)
+    if owns_logger:
+        logger.log_config(
+            {
+                "exp_dir": str(exp_dir),
+                "fold_tag": fold_tag,
+                "epochs": args.epochs,
+                "lr": args.lr,
+                "weight_decay": args.weight_decay,
+                "L": exp.L,
+                "train_batch_size": args.train_batch_size,
+                "eval_batch_size": args.eval_batch_size,
+                "class_weights": w.tolist(),
+            }
+        )
 
     # Log static dataset stats + configure ticker charts
     logger.setup(
@@ -158,13 +187,15 @@ def run_single_fold(args: argparse.Namespace, exp_dir: Path, fold_tag: str | Non
     if out["best_state"] is not None:
         model.load_state_dict(out["best_state"])
 
-    # Final evaluation (log at step=epochs+1)
-    evaluator.evaluate_all(
+    # Final evaluation of the restored best checkpoint.
+    best_metrics = evaluator.evaluate_all(
         model,
         {"train": dl_train_eval, "val": dl_val, "test": dl_test},
         step=args.epochs + 1,
     )
-    logger.stop()
+    logger.child(namespace="best").log(best_metrics, step=args.epochs + 1)
+    if owns_logger:
+        logger.stop()
     return float(out["best_metric"])
 
 
@@ -177,18 +208,38 @@ def main() -> None:
         if not folds:
             raise RuntimeError(f"No folds found in cv manifest: {args.cv_manifest}")
 
+        root_logger = _make_logger(args, exp_dir=Path(payload.get("exp_dir", folds[0]["exp_dir"])), fold_tag="cv")
+        root_logger.log_config(
+            {
+                "cv_manifest": str(args.cv_manifest),
+                "cv_folds": len(folds),
+            }
+        )
+
         bests = []
-        for fold in folds:
+        steps_per_fold = args.epochs + 2
+        for i, fold in enumerate(folds):
             fold_idx = int(fold["fold_idx"])
             exp_dir = Path(fold["exp_dir"])
             fold_tag = f"fold{fold_idx:02d}"
             print(f"\n=== Training {fold_tag} on {exp_dir} ===")
-            best_metric = run_single_fold(args, exp_dir=exp_dir, fold_tag=fold_tag)
+            fold_logger = root_logger.child(namespace=fold_tag, step_offset=i * steps_per_fold)
+            best_metric = run_single_fold(args, exp_dir=exp_dir, fold_tag=fold_tag, logger=fold_logger)
             bests.append(best_metric)
+            root_logger.log({f"summary/{fold_tag}/best_val_accuracy": float(best_metric)}, step=(i + 1) * steps_per_fold)
 
         mean_best = sum(bests) / len(bests)
         var_best = sum((x - mean_best) ** 2 for x in bests) / len(bests)
         std_best = var_best ** 0.5
+        root_logger.log(
+            {
+                "summary/cv/best_val_accuracy_mean": float(mean_best),
+                "summary/cv/best_val_accuracy_std": float(std_best),
+                "summary/cv/folds": len(bests),
+            },
+            step=len(folds) * steps_per_fold + 1,
+        )
+        root_logger.stop()
         print("\nCross-validation summary:")
         print(f"  folds={len(bests)}")
         print(f"  best val/accuracy mean={mean_best:.6f}")
