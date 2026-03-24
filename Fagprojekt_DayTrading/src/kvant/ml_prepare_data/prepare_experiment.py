@@ -533,7 +533,7 @@ def prepare_single_dataset(dataset_split: DownloadedDatasetSplit, sampler, featu
 
     # sampler = IdentitySampler(subsample_every=1)
     # fe = OHLCVFeatures(cols=("open", "high", "low", "close", "volume"), log1p_volume=True)
-    # labeler = TripleBarrierLabeler(name="tb_w60_h2pct", width_minutes=60, height=0.02, drop_time_exit_label=False)
+    # labeler = TripleBarrierLabeler(name="tb_w60_h2pct", width_minutes=60, height=0.02, drop_time_exit_label=True)
     # L = 200
     cfg = ExperimentConfig(
         experiment_name="exp_minimal_sep_components",
@@ -564,7 +564,7 @@ def main():
     downloaded_splits = get_huggingface_top_20_normal_splits()
 
     TBPD = 30
-    L, width, height_pct = 12, 120, 1.5
+    L, width, height_pct = 12, 180, 1.5
     label = f"sb_L_{L}_w{width}_h{height_pct}_TBPD{TBPD}"
     print(f"Writing to {label=}")
 
@@ -585,7 +585,7 @@ def main():
         )
         fe = StandardizedFeatures(base=base_fe)
         labeler = TripleBarrierLabeler(
-            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=False
+            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=True
         )
 
         cfg = ExperimentConfig(
