@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 
@@ -126,7 +127,7 @@ def compute_return_stats(
             continue
 
         yp = int(yp)
-        if yp in (0, 2):  # call / put
+        if yp in (0, 2):  # short / long
             pnl_frac = m.get("pnl_fraction", None)
             true_label = m.get("label", None)
             if not isinstance(pnl_frac, (int, float)):
@@ -253,4 +254,170 @@ def compute_profit_curve_over_trades(
         "trade_number": trade_number,
         "trade_profit_pct": trade_profit_pct,
         "cum_profit_pct": cum_profit_pct,
+    }
+
+
+def _parse_meta_timestamp(meta: dict, key: str) -> Optional[pd.Timestamp]:
+    """Parse an ISO timestamp from a metadata record."""
+    value = meta.get(key)
+    if not isinstance(value, str) or not value:
+        return None
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return ts
+
+
+def compute_paper_trading_metrics(
+    *,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    metas: List[Optional[dict]],
+    initial_portfolio: float = 1.0,
+    transaction_cost: float = 0.0,
+    risk_free_rate: float = 0.0314,
+    days_per_year: float = 365.0,
+) -> Dict[str, Any]:
+    """
+    Compute portfolio metrics aligned with the paper's evaluation setup.
+
+    The implementation assumes that:
+    - only predictions in classes ``0`` and ``2`` are acted upon,
+    - ``meta["pnl_fraction"]`` is the realized long return for that sample,
+    - class ``2`` is long/up and class ``0`` is short/down,
+    - transaction costs are charged on both entry and exit.
+
+    Args:
+        y_true: Ground-truth class labels.
+        y_pred: Predicted class labels.
+        metas: Label metadata aligned to the predictions.
+        initial_portfolio: Initial portfolio value ``P0``.
+        transaction_cost: Per-side transaction cost expressed as a return fraction.
+        risk_free_rate: Annualized risk-free rate as a decimal.
+        days_per_year: Trading days per year used for annualization.
+
+    Returns:
+        Dictionary with annualized profit, trade hit rate, all-class prediction
+        accuracy, Sharpe ratio, drawdown, and a few supporting counters.
+    """
+    assert len(y_true) == len(y_pred) == len(metas)
+
+    y_true = np.asarray(y_true, dtype=np.int64)
+    y_pred = np.asarray(y_pred, dtype=np.int64)
+
+    tp = int(np.sum((y_true == 2) & (y_pred == 2)))
+    tn = int(np.sum((y_true == 0) & (y_pred == 0)))
+    fp = int(np.sum((y_true == 0) & (y_pred == 2)))
+    fn = int(np.sum((y_true == 2) & (y_pred == 0)))
+    accuracy_all_predictions = float(np.mean(y_true == y_pred)) if len(y_true) else 0.0
+
+    timeline_points: List[pd.Timestamp] = []
+    trades: List[dict[str, Any]] = []
+
+    for yp, meta in zip(y_pred, metas):
+        if meta is None:
+            continue
+
+        open_ts = _parse_meta_timestamp(meta, "bar_open_time")
+        close_ts = _parse_meta_timestamp(meta, "bar_close_time")
+        if open_ts is not None:
+            timeline_points.append(open_ts)
+        if close_ts is not None:
+            timeline_points.append(close_ts)
+
+        if int(yp) not in (0, 2):
+            continue
+
+        pnl_frac = meta.get("pnl_fraction")
+        if not isinstance(pnl_frac, (int, float)):
+            continue
+
+        signed_gross_return = float(pnl_frac) if int(yp) == 2 else -float(pnl_frac)
+        net_return = signed_gross_return - (2.0 * float(transaction_cost))
+        trades.append(
+            {
+                "close_time": close_ts or open_ts,
+                "gross_return": signed_gross_return,
+                "net_return": net_return,
+            }
+        )
+
+    trades = [trade for trade in trades if trade["close_time"] is not None]
+    trades.sort(key=lambda trade: trade["close_time"])
+
+    if timeline_points:
+        period_start = min(timeline_points).normalize()
+        period_end = max(timeline_points).normalize()
+    elif trades:
+        period_start = trades[0]["close_time"].normalize()
+        period_end = trades[-1]["close_time"].normalize()
+    else:
+        now = pd.Timestamp.now(tz="UTC").normalize()
+        period_start = now
+        period_end = now
+
+    daily_index = pd.date_range(period_start, period_end, freq="D", tz="UTC")
+    if len(daily_index) == 0:
+        daily_index = pd.DatetimeIndex([period_start])
+
+    portfolio_value = float(initial_portfolio)
+    trade_records: List[dict[str, Any]] = []
+    for trade in trades:
+        portfolio_value *= max(0.0, 1.0 + float(trade["net_return"]))
+        trade_records.append(
+            {
+                "close_time": trade["close_time"],
+                "portfolio_value": portfolio_value,
+                "net_return": float(trade["net_return"]),
+            }
+        )
+
+    if trade_records:
+        trade_df = pd.DataFrame.from_records(trade_records)
+        trade_df["date"] = pd.to_datetime(trade_df["close_time"], utc=True).dt.normalize()
+        daily_portfolio = trade_df.groupby("date")["portfolio_value"].last().reindex(daily_index).ffill()
+        daily_portfolio = daily_portfolio.fillna(float(initial_portfolio))
+    else:
+        daily_portfolio = pd.Series(float(initial_portfolio), index=daily_index, dtype=np.float64)
+
+    daily_returns = daily_portfolio.pct_change().fillna(0.0)
+    final_portfolio = float(daily_portfolio.iloc[-1])
+    n_days = max(int(len(daily_portfolio)), 1)
+
+    annual_net_profit_loss_pct = (
+        ((final_portfolio / float(initial_portfolio)) ** (float(days_per_year) / float(n_days)) - 1.0) * 100.0
+        if initial_portfolio > 0
+        else 0.0
+    )
+
+    n_executed_trades = len(trades)
+    profitable_transactions_pct = (
+        float(np.mean([trade["net_return"] > 0.0 for trade in trades]) * 100.0) if trades else 0.0
+    )
+
+    risk_free_daily = (1.0 + float(risk_free_rate)) ** (1.0 / float(days_per_year)) - 1.0
+    daily_std = float(daily_returns.std(ddof=0))
+    sharpe_ratio_annualized = (
+        float(np.sqrt(float(days_per_year)) * ((daily_returns.mean() - risk_free_daily) / daily_std))
+        if daily_std > 0.0
+        else 0.0
+    )
+
+    running_peak = daily_portfolio.cummax()
+    max_drawdown_pct = float(((running_peak - daily_portfolio) / running_peak.clip(lower=1e-12)).max() * 100.0)
+
+    return {
+        "paper/annual_net_profit_loss_pct": float(annual_net_profit_loss_pct),
+        "paper/profitable_transactions_pct": float(profitable_transactions_pct),
+        "paper/accuracy_all_predictions": float(accuracy_all_predictions),
+        "paper/sharpe_ratio_annualized": float(sharpe_ratio_annualized),
+        "paper/max_drawdown_pct": float(max_drawdown_pct),
+        "paper/n_executed_trades": int(n_executed_trades),
+        "paper/n_test_days": int(n_days),
+        "paper/tp": int(tp),
+        "paper/tn": int(tn),
+        "paper/fp": int(fp),
+        "paper/fn": int(fn),
     }

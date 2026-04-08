@@ -10,13 +10,24 @@ from sklearn.metrics import confusion_matrix
 
 from kvant.ml_prepare_data.data_loading import PreparedStore
 from .predict import predict
-from .metrics import classification_metrics, compute_action_profit_stats, compute_profit_curve_over_trades
+from .metrics import (
+    classification_metrics,
+    compute_action_profit_stats,
+    compute_paper_trading_metrics,
+    compute_profit_curve_over_trades,
+)
 
 
 @dataclass(frozen=True)
 class EvalConfig:
     compute_per_ticker_accuracy: bool = True
     compute_profit_stats: bool = True
+    compute_paper_trading_metrics: bool = True
+    initial_portfolio: float = 1.0
+    # Realistic per-side default: fee 0.0004 + half-spread 0.0003 + slippage 0.0003 = 0.001.
+    transaction_cost: float = 0.001
+    risk_free_rate: float = 0.0314
+    days_per_year: float = 365.0
     labels: tuple[int, ...] = (0, 1, 2)
 
 
@@ -70,6 +81,18 @@ class ExperimentEvaluator:
                 "split": split,
                 "epoch": int(step) if step is not None else None,
             } | compute_profit_curve_over_trades(y_pred=y_pred, metas=metas)
+            if self.cfg.compute_paper_trading_metrics:
+                paper_metrics = compute_paper_trading_metrics(
+                    y_true=y_true,
+                    y_pred=y_pred,
+                    metas=metas,
+                    initial_portfolio=self.cfg.initial_portfolio,
+                    transaction_cost=self.cfg.transaction_cost,
+                    risk_free_rate=self.cfg.risk_free_rate,
+                    days_per_year=self.cfg.days_per_year,
+                )
+                for k, v in paper_metrics.items():
+                    metrics[f"{split}/{k}"] = v
 
         # per-ticker accuracy (+ profit stats columns)
         if self.cfg.compute_per_ticker_accuracy:

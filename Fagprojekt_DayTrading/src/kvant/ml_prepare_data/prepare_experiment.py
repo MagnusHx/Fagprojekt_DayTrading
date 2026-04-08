@@ -585,7 +585,7 @@ def main():
         )
         fe = StandardizedFeatures(base=base_fe)
         labeler = TripleBarrierLabeler(
-            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=True
+            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=False
         )
 
         cfg = ExperimentConfig(

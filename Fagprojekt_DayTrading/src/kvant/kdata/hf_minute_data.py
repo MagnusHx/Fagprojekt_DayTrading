@@ -427,10 +427,9 @@ if __name__ == "__main__":
         if bar.label == 1:
             continue
         elif bar.label == 0:
-
-            trades.append( -bar.pnl_absolute )
+            trades.append(-bar.pnl_absolute)
         elif bar.label == 2:
-            trades.append( bar.pnl_absolute )
+            trades.append(bar.pnl_absolute)
 
         # if i > 30000:
         tn = t
@@ -477,7 +476,7 @@ if __name__ == "__main__":
             f"Range: {idx[0]} → {idx[-1]}",
             f"Close: {y[0]:.2f} → {y[-1]:.2f}",
             f"Return: {(y[-1] / y[0] - 1) * 100:.2f}%",
-            f"Down / Flat / Up: {label_counts.get(0, 0)} / {label_counts.get(1, 0)} / {label_counts.get(2, 0)}",
+            f"Down / Exit / Up: {label_counts.get(0, 0)} / {label_counts.get(1, 0)} / {label_counts.get(2, 0)}",
             f"No label: {label_counts.get(None, 0)}",
             f"Width: {width} min | Height: {height:.2%}",
         ]

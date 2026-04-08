@@ -13,15 +13,15 @@ import matplotlib.pyplot as plt
 
 
 LABEL_MEANINGS = {
-    0: "triple-bar up > 2.5%",
+    0: "triple-bar down > 2.5%",
     1: "triple-bar flat",
-    2: "triple-bar down > 2.5%",
+    2: "triple-bar up > 2.5%",
 }
 
 CLASS_NAMES = [
-    "Up > 2.5% (y=0)",
+    "Down > 2.5% (y=0)",
     "Flat (y=1)",
-    "Down > 2.5% (y=2)",
+    "Up > 2.5% (y=2)",
 ]
 
 

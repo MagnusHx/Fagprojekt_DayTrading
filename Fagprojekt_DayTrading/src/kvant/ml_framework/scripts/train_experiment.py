@@ -22,19 +22,17 @@ project = os.environ.get("WANDB_PROJECT", "Kvant")
 entity = os.environ.get("WANDB_ENTITY", "s245509-danmarks-tekniske-universitet-dtu")
 
 
-
-
-
-
 def parse_args() -> argparse.Namespace:
     exp_id = "11bc7f8b735e5936"
     exp_id = "sb_L_400_w120_h2pct"
     exp_id = "sb_L_40_w120_h1.5_TBPD20"
     from kvant.ml_prepare_data import prepared_data_root
-    with open(prepared_data_root / "last_experiment.txt", 'r') as f:
+
+    with open(prepared_data_root / "last_experiment.txt", "r") as f:
         exp_id = f.read().strip()
 
     from kvant.ml_prepare_data import prepared_data_root
+
     default_exp_dir = prepared_data_root / exp_id
     default_cv_manifest = None
     cv_ptr = prepared_data_root / "last_experiment_cv_manifest.txt"
@@ -56,6 +54,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wandb-name", type=str, default=None)
     p.add_argument("--wandb-api-timeout", type=int, default=29)
     p.add_argument("--no-return-stats", action="store_true")
+    p.add_argument("--initial-portfolio", type=float, default=1.0)
+    p.add_argument("--transaction-cost", type=float, default=0.001)
+    p.add_argument("--risk-free-rate", type=float, default=0.0314)
+    p.add_argument("--days-per-year", type=float, default=365.0)
     p.add_argument("--topk-ticker-plots", type=int, default=50)
     return p.parse_args()
 
@@ -69,7 +71,9 @@ def _make_logger(
     return WandbLogger(
         project=project,
         entity=entity,
-        name=(args.wandb_name or "stocks-run") if fold_tag is None else f"{(args.wandb_name or 'stocks-run')}-{fold_tag}",
+        name=(args.wandb_name or "stocks-run")
+        if fold_tag is None
+        else f"{(args.wandb_name or 'stocks-run')}-{fold_tag}",
         api_timeout=args.wandb_api_timeout,
         config={
             "exp_dir": str(exp_dir),
@@ -81,6 +85,10 @@ def _make_logger(
             "train_batch_size": args.train_batch_size,
             "eval_batch_size": args.eval_batch_size,
             "class_weights": None,
+            "initial_portfolio": args.initial_portfolio,
+            "transaction_cost": args.transaction_cost,
+            "risk_free_rate": args.risk_free_rate,
+            "days_per_year": args.days_per_year,
         },
     )
 
@@ -114,9 +122,7 @@ def run_single_fold(
     for ds, split_name in [(ds_train, "train"), (ds_val, "val"), (ds_test, "test")]:
         print(f"Dataset {split_name}")
         ds.summary(display=True)
-        print("-"*10,"\n")
-
-
+        print("-" * 10, "\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Conv1DClassifier(n_features=exp.store.n_features, n_classes=3).to(device)
@@ -139,6 +145,10 @@ def run_single_fold(
                 "train_batch_size": args.train_batch_size,
                 "eval_batch_size": args.eval_batch_size,
                 "class_weights": w.tolist(),
+                "initial_portfolio": args.initial_portfolio,
+                "transaction_cost": args.transaction_cost,
+                "risk_free_rate": args.risk_free_rate,
+                "days_per_year": args.days_per_year,
             }
         )
 
@@ -154,6 +164,11 @@ def run_single_fold(
         logger=logger,
         cfg=EvalConfig(
             compute_per_ticker_accuracy=True,
+            compute_paper_trading_metrics=True,
+            initial_portfolio=args.initial_portfolio,
+            transaction_cost=args.transaction_cost,
+            risk_free_rate=args.risk_free_rate,
+            days_per_year=args.days_per_year,
         ),
     )
 
@@ -226,11 +241,13 @@ def main() -> None:
             fold_logger = root_logger.child(namespace=fold_tag, step_offset=i * steps_per_fold)
             best_metric = run_single_fold(args, exp_dir=exp_dir, fold_tag=fold_tag, logger=fold_logger)
             bests.append(best_metric)
-            root_logger.log({f"summary/{fold_tag}/best_val_accuracy": float(best_metric)}, step=(i + 1) * steps_per_fold)
+            root_logger.log(
+                {f"summary/{fold_tag}/best_val_accuracy": float(best_metric)}, step=(i + 1) * steps_per_fold
+            )
 
         mean_best = sum(bests) / len(bests)
         var_best = sum((x - mean_best) ** 2 for x in bests) / len(bests)
-        std_best = var_best ** 0.5
+        std_best = var_best**0.5
         root_logger.log(
             {
                 "summary/cv/best_val_accuracy_mean": float(mean_best),
@@ -247,6 +264,7 @@ def main() -> None:
         return
 
     run_single_fold(args, exp_dir=args.exp_dir, fold_tag=None)
+
 
 if __name__ == "__main__":
     main()
