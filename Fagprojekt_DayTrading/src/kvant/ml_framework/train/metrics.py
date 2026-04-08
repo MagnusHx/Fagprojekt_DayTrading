@@ -127,7 +127,7 @@ def compute_return_stats(
             continue
 
         yp = int(yp)
-        if yp in (0, 2):  # short / long
+        if yp in (0, 2):  # call / put
             pnl_frac = m.get("pnl_fraction", None)
             true_label = m.get("label", None)
             if not isinstance(pnl_frac, (int, float)):
@@ -276,7 +276,7 @@ def compute_paper_trading_metrics(
     y_pred: np.ndarray,
     metas: List[Optional[dict]],
     initial_portfolio: float = 1.0,
-    transaction_cost: float = 0.0,
+    transaction_cost: float = 0.0004,
     risk_free_rate: float = 0.0314,
     days_per_year: float = 365.0,
 ) -> Dict[str, Any]:
@@ -286,7 +286,7 @@ def compute_paper_trading_metrics(
     The implementation assumes that:
     - only predictions in classes ``0`` and ``2`` are acted upon,
     - ``meta["pnl_fraction"]`` is the realized long return for that sample,
-    - class ``2`` is long/up and class ``0`` is short/down,
+    - short trades invert the sign of ``pnl_fraction``,
     - transaction costs are charged on both entry and exit.
 
     Args:
@@ -299,8 +299,8 @@ def compute_paper_trading_metrics(
         days_per_year: Trading days per year used for annualization.
 
     Returns:
-        Dictionary with annualized profit, trade hit rate, all-class prediction
-        accuracy, Sharpe ratio, drawdown, and a few supporting counters.
+        Dictionary with annualized profit, trade hit rate, directional accuracy,
+        Sharpe ratio, drawdown, and a few supporting counters.
     """
     assert len(y_true) == len(y_pred) == len(metas)
 
@@ -311,7 +311,8 @@ def compute_paper_trading_metrics(
     tn = int(np.sum((y_true == 0) & (y_pred == 0)))
     fp = int(np.sum((y_true == 0) & (y_pred == 2)))
     fn = int(np.sum((y_true == 2) & (y_pred == 0)))
-    accuracy_all_predictions = float(np.mean(y_true == y_pred)) if len(y_true) else 0.0
+    directional_total = tp + tn + fp + fn
+    directional_accuracy = float((tp + tn) / directional_total) if directional_total else 0.0
 
     timeline_points: List[pd.Timestamp] = []
     trades: List[dict[str, Any]] = []
@@ -411,7 +412,7 @@ def compute_paper_trading_metrics(
     return {
         "paper/annual_net_profit_loss_pct": float(annual_net_profit_loss_pct),
         "paper/profitable_transactions_pct": float(profitable_transactions_pct),
-        "paper/accuracy_all_predictions": float(accuracy_all_predictions),
+        "paper/directional_accuracy": float(directional_accuracy),
         "paper/sharpe_ratio_annualized": float(sharpe_ratio_annualized),
         "paper/max_drawdown_pct": float(max_drawdown_pct),
         "paper/n_executed_trades": int(n_executed_trades),
