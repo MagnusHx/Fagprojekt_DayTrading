@@ -9,9 +9,9 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import confusion_matrix
 
 from kvant.ml_prepare_data.data_loading import PreparedStore
+from .classification_metrics import classification_metrics
 from .predict import predict
-from .metrics import (
-    classification_metrics,
+from .trading_metrics import (
     compute_action_profit_stats,
     compute_paper_trading_metrics,
     compute_profit_curve_over_trades,
@@ -76,16 +76,27 @@ class ExperimentEvaluator:
         if self.cfg.compute_profit_stats:
             index = np.stack([tid, tpos], axis=1).astype(np.int32, copy=False)
             metas = self.store.metadata_for_index(index)
-            per_tid_profit = compute_action_profit_stats(y_pred=y_pred, metas=metas, tids=tid)
+            per_tid_profit = compute_action_profit_stats(
+                y_pred=y_pred,
+                metas=metas,
+                tids=tid,
+                transaction_cost=self.cfg.transaction_cost,
+            )
             profit_curve = {
                 "split": split,
                 "epoch": int(step) if step is not None else None,
-            } | compute_profit_curve_over_trades(y_pred=y_pred, metas=metas)
+            } | compute_profit_curve_over_trades(
+                y_pred=y_pred,
+                metas=metas,
+                tids=tid,
+                transaction_cost=self.cfg.transaction_cost,
+            )
             if self.cfg.compute_paper_trading_metrics:
                 paper_metrics = compute_paper_trading_metrics(
                     y_true=y_true,
                     y_pred=y_pred,
                     metas=metas,
+                    tids=tid,
                     initial_portfolio=self.cfg.initial_portfolio,
                     transaction_cost=self.cfg.transaction_cost,
                     risk_free_rate=self.cfg.risk_free_rate,

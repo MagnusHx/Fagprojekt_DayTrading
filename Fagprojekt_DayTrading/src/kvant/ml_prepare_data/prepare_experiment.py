@@ -6,12 +6,13 @@ from kvant.ml_prepare_data.features.feature_engineering import (
 )
 import json
 import hashlib
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import tqdm
 
+from kvant.labels import label_semantics_payload
 from kvant.ml_prepare_data.labelling.tripple_bar import Labeler, TripleBarrierLabeler
 from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
 from kvant.ml_prepare_data.reporting import report_sampling_density
@@ -35,6 +36,7 @@ class ExperimentConfig:
     feature_engineer: dict
     labeler: dict
     lookback_L: int
+    label_semantics: dict = field(default_factory=label_semantics_payload)
 
     def stable_id(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, default=str).encode("utf-8")

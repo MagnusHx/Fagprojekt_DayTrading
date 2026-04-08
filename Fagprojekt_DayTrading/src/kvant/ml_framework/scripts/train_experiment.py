@@ -164,7 +164,8 @@ def run_single_fold(
         logger=logger,
         cfg=EvalConfig(
             compute_per_ticker_accuracy=True,
-            compute_paper_trading_metrics=True,
+            compute_profit_stats=not args.no_return_stats,
+            compute_paper_trading_metrics=not args.no_return_stats,
             initial_portfolio=args.initial_portfolio,
             transaction_cost=args.transaction_cost,
             risk_free_rate=args.risk_free_rate,

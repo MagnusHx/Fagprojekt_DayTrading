@@ -11,18 +11,7 @@ import pandas as pd
 import wandb
 import matplotlib.pyplot as plt
 
-
-LABEL_MEANINGS = {
-    0: "triple-bar down > 2.5%",
-    1: "triple-bar flat",
-    2: "triple-bar up > 2.5%",
-}
-
-CLASS_NAMES = [
-    "Down > 2.5% (y=0)",
-    "Flat (y=1)",
-    "Up > 2.5% (y=2)",
-]
+from kvant.labels import CLASS_NAMES, LABEL_MEANINGS
 
 
 def _safe_int(x: Any, default: int = 0) -> int:
@@ -539,7 +528,11 @@ class WandbLogger:
                 fig = _plot_confusion_heatmap(np.asarray(cm), title=f"Confusion matrix ({split})")
                 wandb.log({self._qualify_key(f"charts/confusion_matrix/{split}"): wandb.Image(fig)}, step=step)
                 wandb.log(
-                    {self._qualify_key(f"perf/confusion_matrix_normalized/{split}"): _normalized_confusion_table(np.asarray(cm))},
+                    {
+                        self._qualify_key(f"perf/confusion_matrix_normalized/{split}"): _normalized_confusion_table(
+                            np.asarray(cm)
+                        )
+                    },
                     step=step,
                 )
                 plt.close(fig)

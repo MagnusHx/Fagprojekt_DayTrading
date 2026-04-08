@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
+
+from kvant.labels import validate_label_semantics
 
 
 def _load_jsonl(path: Path) -> List[Optional[dict]]:
@@ -46,9 +49,7 @@ class PreparedStore:
             if meta_path.exists():
                 md = _load_jsonl(meta_path)
                 if len(md) != len(y):
-                    raise RuntimeError(
-                        f"{t}: label_metadata length {len(md)} != labels length {len(y)}"
-                    )
+                    raise RuntimeError(f"{t}: label_metadata length {len(md)} != labels length {len(y)}")
             else:
                 md = [None] * int(len(y))
 
@@ -58,6 +59,14 @@ class PreparedStore:
             self._label_metadata.append(md)
 
         self.n_features = int(self._features[0].shape[1])
+
+    def ticker(self, tid: int) -> str:
+        """Return the ticker symbol for a numeric ticker id."""
+        return str(self.tickers_all[int(tid)])
+
+    def timestamp(self, tid: int, tpos: int):
+        """Return the timestamp for a ticker/position pair."""
+        return self._timestamps[int(tid)][int(tpos)]
 
     def window_and_label(self, tid: int, tpos: int, L: int) -> Tuple[np.ndarray, int]:
         X = self._features[tid]
@@ -79,6 +88,7 @@ class PreparedStore:
             tpos = int(index[i, 1])
             out.append(self.metadata(tid, tpos))
         return out
+
 
 class IndexWindowDataset(Dataset):
     def __init__(self, store: PreparedStore, index: np.ndarray, lookback_L: int):
@@ -117,18 +127,18 @@ class IndexWindowDataset(Dataset):
             "label_metadata": self.store.metadata(tid, tpos),
         }
 
-    def summary(self, display : bool = True):
+    def summary(self, display: bool = True):
         from kvant.ml_prepare_data.data_loading_utils import summary
+
         return summary(self, display=display)
 
-
-import os
 
 class PreparedExperiment:
     """
     Owns: config + store + split indices.
     Provides: get_datasets() and get_loaders() returning train/val/test.
     """
+
     @classmethod
     def does_experiment_exist(cls, exp_dir: Path) -> bool:
         return os.path.isfile(exp_dir / "config.json")
@@ -136,6 +146,7 @@ class PreparedExperiment:
     def __init__(self, exp_dir: Path):
         self.exp_dir = exp_dir
         self.cfg = json.loads((exp_dir / "config.json").read_text())
+        validate_label_semantics(self.cfg, exp_dir=exp_dir)
         self.L = int(self.cfg["lookback_L"])
 
         self.store = PreparedStore(exp_dir)
@@ -151,11 +162,11 @@ class PreparedExperiment:
         return ds_train, ds_val, ds_test
 
     def get_loaders(
-            self,
-            train_batch_size: int = 256,
-            eval_batch_size: int = 512,
-            num_workers: int = 0,
-            pin_memory: bool = True,
+        self,
+        train_batch_size: int = 256,
+        eval_batch_size: int = 512,
+        num_workers: int = 0,
+        pin_memory: bool = True,
     ) -> Tuple[DataLoader, DataLoader, DataLoader]:
         ds_train, ds_val, ds_test = self.get_datasets()
 

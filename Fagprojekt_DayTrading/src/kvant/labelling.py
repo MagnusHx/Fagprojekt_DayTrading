@@ -5,13 +5,14 @@ import numpy as np
 import pandas as pd
 
 from kvant.kmarket_info.is_nyse_open import nyse_trade_window_is_valid
+from kvant.labels import LABEL_DOWN, LABEL_EXIT, LABEL_UP
 
 
 @dataclasses.dataclass(frozen=True)
 class TripleBarLabel:
     bar_open_time: pd.Timestamp
     bar_close_time: pd.Timestamp
-    label: int           # 0 = stop-loss (DOWN), 1 = vertical/time exit, 2 = take-profit (UP)
+    label: int  # 0 = stop-loss (DOWN), 1 = vertical/time exit, 2 = take-profit (UP)
     pnl_fraction: float  # (exit - entry) / entry
     pnl_absolute: float  # (exit - entry) in price units (e.g., $ per share)
 
@@ -58,11 +59,9 @@ def tripple_bar_label(
     if not required_cols.issubset(data.columns):
         raise ValueError(f"data must contain columns {sorted(required_cols)}")
 
-
     # df = data.sort_index()
     df = data
     ts0 = _to_utc_ts(time_start)
-
 
     # Find the first bar at/after time_start
     pos = df.index.searchsorted(ts0, side="left")
@@ -102,7 +101,7 @@ def tripple_bar_label(
     # Decide earliest barrier hit (if any)
     if len(up_times) == 0 and len(dn_times) == 0:
         # Vertical barrier exit
-        label = 1
+        label = LABEL_EXIT
         exit_ts = exit_ts_vertical
         exit_price = float(path.loc[exit_ts, "close"])
         if not np.isfinite(exit_price) or exit_price <= 0:
@@ -113,11 +112,11 @@ def tripple_bar_label(
 
         # If both hit in the same bar, choose stop-loss (conservative)
         if first_dn is not None and (first_up is None or first_dn <= first_up):
-            label = 0
+            label = LABEL_DOWN
             exit_ts = first_dn
             exit_price = lower
         else:
-            label = 2
+            label = LABEL_UP
             exit_ts = first_up
             exit_price = upper
 
