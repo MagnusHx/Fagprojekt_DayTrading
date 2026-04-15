@@ -58,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--transaction-cost", type=float, default=0.001)
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
-    p.add_argument("--trade-confidence-threshold", type=float, default=0.0)
+    p.add_argument("--trade-confidence-threshold", type=float, default=0.5)
     p.add_argument("--topk-ticker-plots", type=int, default=50)
     return p.parse_args()
 

@@ -1,0 +1,25 @@
+
+=== Training fold00 on /home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_fold00 ===
+Dataset train
+tabulate is not installed. Run: pip install tabulate
+----------
+
+Dataset val
+tabulate is not installed. Run: pip install tabulate
+----------
+
+Dataset test
+tabulate is not installed. Run: pip install tabulate
+----------
+
+epoch=0001 train_loss=0.9609 val/accuracy=0.7224 best=0.7224 [train/epoch: 8.51 train(pct): 0.13 eval(pct): 0.87]
+epoch=0002 train_loss=0.9351 val/accuracy=0.6624 best=0.7224 [train/epoch: 8.28 train(pct): 0.11 eval(pct): 0.89]
+epoch=0003 train_loss=0.9263 val/accuracy=0.7005 best=0.7224 [train/epoch: 8.22 train(pct): 0.11 eval(pct): 0.89]
+epoch=0004 train_loss=0.9217 val/accuracy=0.6974 best=0.7224 [train/epoch: 8.19 train(pct): 0.11 eval(pct): 0.89]
+epoch=0005 train_loss=0.9175 val/accuracy=0.7075 best=0.7224 [train/epoch: 9.12 train(pct): 0.12 eval(pct): 0.88]
+epoch=0006 train_loss=0.9152 val/accuracy=0.7017 best=0.7224 [train/epoch: 9.14 train(pct): 0.12 eval(pct): 0.88]
+epoch=0007 train_loss=0.9120 val/accuracy=0.6977 best=0.7224 [train/epoch: 9.16 train(pct): 0.12 eval(pct): 0.88]
+epoch=0008 train_loss=0.9096 val/accuracy=0.7233 best=0.7233 [train/epoch: 9.53 train(pct): 0.13 eval(pct): 0.87]
+epoch=0009 train_loss=0.9085 val/accuracy=0.5823 best=0.7233 [train/epoch: 9.59 train(pct): 0.13 eval(pct): 0.87]
+epoch=0010 train_loss=0.9058 val/accuracy=0.6869 best=0.7233 [train/epoch: 10.02 train(pct): 0.13 eval(pct): 0.87]
+epoch=0011 train_loss=0.9049 val/accuracy=0.6872 best=0.7233 [train/epoch: 10.28 train(pct): 0.13 eval(pct): 0.87]
