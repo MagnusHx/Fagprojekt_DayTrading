@@ -9,11 +9,12 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import confusion_matrix
 
 from kvant.ml_prepare_data.data_loading import PreparedStore
+from .backtest import BacktestTradeSimulator, compute_paper_trading_metrics
 from .classification_metrics import classification_metrics
 from .predict import predict
 from .trading_metrics import (
+    apply_trade_confidence_threshold,
     compute_action_profit_stats,
-    compute_paper_trading_metrics,
     compute_profit_curve_over_trades,
 )
 
@@ -28,6 +29,9 @@ class EvalConfig:
     transaction_cost: float = 0.001
     risk_free_rate: float = 0.0314
     days_per_year: float = 365.0
+    trade_confidence_threshold: float = 0.0
+    backtest_width_minutes: int = 0
+    backtest_barrier_height: float = 0.0
     labels: tuple[int, ...] = (0, 1, 2)
 
 
@@ -44,6 +48,17 @@ class ExperimentEvaluator:
         self.device = device
         self.cfg = cfg
         self.logger = logger
+        if self.cfg.compute_paper_trading_metrics:
+            if int(self.cfg.backtest_width_minutes) <= 0:
+                raise RuntimeError("Paper trading metrics require a positive backtest_width_minutes setting.")
+            if float(self.cfg.backtest_barrier_height) <= 0.0:
+                raise RuntimeError("Paper trading metrics require a positive backtest_barrier_height setting.")
+        self.paper_trade_simulator = BacktestTradeSimulator(
+            market_data_store=self.store,
+            width_minutes=int(self.cfg.backtest_width_minutes),
+            barrier_height=float(self.cfg.backtest_barrier_height),
+            transaction_cost=float(self.cfg.transaction_cost),
+        )
 
     def evaluate_split(
         self,
@@ -56,8 +71,14 @@ class ExperimentEvaluator:
         pred_out = predict(model, loader, self.device)
         y_true = pred_out["y_true"]
         y_pred = pred_out["y_pred"]
+        y_pred_confidence = pred_out["y_pred_confidence"].astype(np.float64, copy=False)
         tid = pred_out["tid"].astype(np.int64, copy=False)
         tpos = pred_out["tpos"].astype(np.int64, copy=False)
+        y_trade = apply_trade_confidence_threshold(
+            y_pred=y_pred,
+            y_pred_confidence=y_pred_confidence,
+            trade_confidence_threshold=self.cfg.trade_confidence_threshold,
+        )
 
         metrics: Dict[str, Any] = {}
         per_ticker_rows: List[Dict[str, Any]] = []
@@ -66,6 +87,15 @@ class ExperimentEvaluator:
         cls = classification_metrics(y_true, y_pred)
         for k, v in cls.items():
             metrics[f"{split}/{k}"] = v
+        metrics[f"{split}/prediction_confidence_mean"] = float(np.mean(y_pred_confidence)) if len(y_pred_confidence) else 0.0
+        metrics[f"{split}/prediction_confidence_median"] = (
+            float(np.median(y_pred_confidence)) if len(y_pred_confidence) else 0.0
+        )
+        trade_signal_mask = np.isin(y_trade, (0, 2))
+        metrics[f"{split}/trade_confidence_threshold"] = float(self.cfg.trade_confidence_threshold)
+        metrics[f"{split}/trade_signal_count"] = int(np.sum(trade_signal_mask))
+        metrics[f"{split}/trade_signal_rate"] = float(np.mean(trade_signal_mask)) if len(y_trade) else 0.0
+        metrics[f"{split}/high_confidence_trade_signal_count"] = int(np.sum(trade_signal_mask))
 
         # confusion counts for heatmap
         cm = confusion_matrix(y_true, y_pred, labels=list(self.cfg.labels)).astype(np.int64, copy=False)
@@ -77,7 +107,7 @@ class ExperimentEvaluator:
             index = np.stack([tid, tpos], axis=1).astype(np.int32, copy=False)
             metas = self.store.metadata_for_index(index)
             per_tid_profit = compute_action_profit_stats(
-                y_pred=y_pred,
+                y_pred=y_trade,
                 metas=metas,
                 tids=tid,
                 transaction_cost=self.cfg.transaction_cost,
@@ -86,7 +116,7 @@ class ExperimentEvaluator:
                 "split": split,
                 "epoch": int(step) if step is not None else None,
             } | compute_profit_curve_over_trades(
-                y_pred=y_pred,
+                y_pred=y_trade,
                 metas=metas,
                 tids=tid,
                 transaction_cost=self.cfg.transaction_cost,
@@ -94,11 +124,11 @@ class ExperimentEvaluator:
             if self.cfg.compute_paper_trading_metrics:
                 paper_metrics = compute_paper_trading_metrics(
                     y_true=y_true,
-                    y_pred=y_pred,
-                    metas=metas,
+                    y_pred=y_trade,
                     tids=tid,
+                    tpos=tpos,
+                    simulator=self.paper_trade_simulator,
                     initial_portfolio=self.cfg.initial_portfolio,
-                    transaction_cost=self.cfg.transaction_cost,
                     risk_free_rate=self.cfg.risk_free_rate,
                     days_per_year=self.cfg.days_per_year,
                 )

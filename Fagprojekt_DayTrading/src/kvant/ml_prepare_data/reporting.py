@@ -1,13 +1,24 @@
 from __future__ import annotations
 import json
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple
+from typing import Optional, List
 
 import numpy as np
 import pandas as pd
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text())
+
+
+def _load_jsonl(path: Path) -> list[dict | None]:
+    out: list[dict | None] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            out.append(json.loads(line))
+    return out
 
 def _daily_sample_counts_from_timestamps(ts: np.ndarray) -> pd.Series:
     """
@@ -39,7 +50,7 @@ def _save_hist_png(values: np.ndarray, out_path: Path, title: str, bins: int = 5
 
     try:
         import matplotlib.pyplot as plt
-    except Exception as e:
+    except Exception:
         # fallback: save histogram data
         hist, edges = np.histogram(values, bins=bins)
         payload = {
@@ -168,3 +179,135 @@ def report_sampling_density(
         print(df[cols].head(50).to_string(index=False))
 
     return df
+
+
+def report_sample_labeling(
+    exp_dir: Path,
+    *,
+    tickers: Optional[List[str]] = None,
+    max_tickers: int = 6,
+    max_points_per_ticker: int = 1500,
+) -> list[Path]:
+    """
+    Create sample labeling plots from prepared ticker artifacts.
+
+    The plots are based on the saved sampled raw market data and corresponding labels.
+    """
+    tickers_root = exp_dir / "tickers"
+    reports_dir = exp_dir / "reports" / "labeling_samples"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    if tickers is None:
+        preferred = exp_dir / "tickers_train.json"
+        fallback = exp_dir / "tickers_all.json"
+        tickers = json.loads((preferred if preferred.exists() else fallback).read_text())
+
+    tickers = list(tickers)[: max(1, int(max_tickers))]
+    out_paths: list[Path] = []
+
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
+    except Exception:
+        payload = {
+            "tickers": tickers,
+            "max_tickers": int(max_tickers),
+            "max_points_per_ticker": int(max_points_per_ticker),
+            "error": "matplotlib unavailable",
+        }
+        out_path = reports_dir / "labeling_samples.json"
+        out_path.write_text(json.dumps(payload, indent=2))
+        return [out_path]
+
+    color_map = {-1: "black", 0: "red", 1: "blue", 2: "green"}
+    legend_handles = [
+        Line2D([0], [0], marker="o", color="w", label="No label", markerfacecolor="black", markersize=6),
+        Line2D([0], [0], marker="o", color="w", label="Down barrier", markerfacecolor="red", markersize=6),
+        Line2D([0], [0], marker="o", color="w", label="Time exit", markerfacecolor="blue", markersize=6),
+        Line2D([0], [0], marker="o", color="w", label="Up barrier", markerfacecolor="green", markersize=6),
+    ]
+
+    n_cols = min(2, len(tickers))
+    n_rows = int(np.ceil(len(tickers) / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4.5 * n_rows), dpi=140, squeeze=False)
+    fig.suptitle("Sample ticker labeling", fontsize=14)
+
+    for ax in axes.flat[len(tickers) :]:
+        ax.axis("off")
+
+    for plot_idx, ticker in enumerate(tickers):
+        ax = axes.flat[plot_idx]
+        tdir = tickers_root / ticker
+        labels_path = tdir / "labels.npy"
+        market_data_path = tdir / "market_data.npy"
+        meta_path = tdir / "meta.json"
+        label_metadata_path = tdir / "label_metadata.jsonl"
+        timestamps_path = tdir / "timestamps.npy"
+
+        if not (labels_path.exists() and market_data_path.exists() and meta_path.exists() and timestamps_path.exists()):
+            ax.text(0.5, 0.5, f"Missing prepared artifacts for {ticker}", ha="center", va="center")
+            ax.axis("off")
+            continue
+
+        labels = np.load(labels_path, mmap_mode="r")
+        timestamps = pd.to_datetime(np.load(timestamps_path, mmap_mode="r"), utc=True)
+        market_data = np.load(market_data_path, mmap_mode="r")
+        close = np.asarray(market_data[:, 3], dtype=np.float64)
+        meta = _load_json(meta_path)
+        label_metadata = _load_jsonl(label_metadata_path) if label_metadata_path.exists() else []
+
+        n_points = min(int(len(close)), int(max_points_per_ticker))
+        timestamps = timestamps[:n_points]
+        close = close[:n_points]
+        labels = np.asarray(labels[:n_points], dtype=np.int64)
+        colors = [color_map.get(int(label), "black") for label in labels]
+
+        counts = pd.Series(labels).value_counts().to_dict()
+        width_minutes = ((meta.get("sampler_ticker_meta") or {}).get("h", None))
+        tb_width = ((label_metadata[0] or {}).get("bar_close_time") if label_metadata else None)
+
+        ax.plot(timestamps, close, color="#999999", linewidth=1.0, alpha=0.7)
+        ax.scatter(timestamps, close, c=colors, s=10, linewidths=0)
+        ax.set_title(f"{ticker} | rows={n_points:,}")
+        ax.set_xlabel("time (UTC)")
+        ax.set_ylabel("close")
+        ax.grid(alpha=0.2)
+        ax.legend(handles=legend_handles, loc="upper left", frameon=False)
+        ax.text(
+            1.02,
+            0.98,
+            "\n".join(
+                [
+                    f"Down / Exit / Up: {counts.get(0, 0)} / {counts.get(1, 0)} / {counts.get(2, 0)}",
+                    f"No label: {counts.get(-1, 0)}",
+                    f"Sampled rows shown: {n_points:,}",
+                    f"Tuned sampler h: {width_minutes}" if width_minutes is not None else "Tuned sampler h: n/a",
+                    f"First labeled close_ts: {tb_width}" if tb_width is not None else "First labeled close_ts: n/a",
+                ]
+            ),
+            transform=ax.transAxes,
+            va="top",
+            fontsize=8,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.9},
+        )
+
+        ticker_out = reports_dir / f"{ticker}_labeling.png"
+        ticker_fig, ticker_ax = plt.subplots(figsize=(16, 5), dpi=140)
+        ticker_ax.plot(timestamps, close, color="#999999", linewidth=1.0, alpha=0.7)
+        ticker_ax.scatter(timestamps, close, c=colors, s=10, linewidths=0)
+        ticker_ax.set_title(f"Sample labeling for {ticker}")
+        ticker_ax.set_xlabel("time (UTC)")
+        ticker_ax.set_ylabel("close")
+        ticker_ax.grid(alpha=0.2)
+        ticker_ax.legend(handles=legend_handles, loc="upper left", frameon=False)
+        ticker_fig.tight_layout()
+        ticker_fig.savefig(ticker_out, dpi=140)
+        plt.close(ticker_fig)
+        out_paths.append(ticker_out)
+
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    combined_out = reports_dir / "labeling_sample_tickers.png"
+    fig.savefig(combined_out, dpi=140)
+    plt.close(fig)
+    out_paths.append(combined_out)
+    return out_paths

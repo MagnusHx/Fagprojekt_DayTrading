@@ -58,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--transaction-cost", type=float, default=0.001)
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
+    p.add_argument("--trade-confidence-threshold", type=float, default=0.0)
     p.add_argument("--topk-ticker-plots", type=int, default=50)
     return p.parse_args()
 
@@ -89,6 +90,9 @@ def _make_logger(
             "transaction_cost": args.transaction_cost,
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
+            "trade_confidence_threshold": args.trade_confidence_threshold,
+            "backtest_width_minutes": None,
+            "backtest_barrier_height": None,
         },
     )
 
@@ -126,6 +130,7 @@ def run_single_fold(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Conv1DClassifier(n_features=exp.store.n_features, n_classes=3).to(device)
+    labeler_cfg = exp.cfg.get("labeler", {})
 
     w = class_weights_from_dataset(ds_train, n_classes=3)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(w, device=device))
@@ -149,6 +154,9 @@ def run_single_fold(
                 "transaction_cost": args.transaction_cost,
                 "risk_free_rate": args.risk_free_rate,
                 "days_per_year": args.days_per_year,
+                "trade_confidence_threshold": args.trade_confidence_threshold,
+                "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0)),
+                "backtest_barrier_height": float(labeler_cfg.get("height", 0.0)),
             }
         )
 
@@ -170,6 +178,9 @@ def run_single_fold(
             transaction_cost=args.transaction_cost,
             risk_free_rate=args.risk_free_rate,
             days_per_year=args.days_per_year,
+            trade_confidence_threshold=args.trade_confidence_threshold,
+            backtest_width_minutes=int(labeler_cfg.get("width_minutes", 0)),
+            backtest_barrier_height=float(labeler_cfg.get("height", 0.0)),
         ),
     )
 

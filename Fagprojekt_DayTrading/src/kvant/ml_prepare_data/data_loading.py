@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -29,8 +29,11 @@ def _load_jsonl(path: Path) -> List[Optional[dict]]:
 
 
 class PreparedStore:
+    MARKET_DATA_COLUMNS = ("open", "high", "low", "close", "volume")
+
     def __init__(self, exp_dir: Path):
         self.exp_dir = exp_dir
+        self.cfg = json.loads((exp_dir / "config.json").read_text())
         self.tickers_all = json.loads((exp_dir / "tickers_all.json").read_text())
         self.ticker_to_id = {t: i for i, t in enumerate(self.tickers_all)}
 
@@ -38,12 +41,15 @@ class PreparedStore:
         self._labels: List[np.ndarray] = []
         self._timestamps: List[np.ndarray] = []
         self._label_metadata: List[List[Optional[dict]]] = []
+        self._market_data: List[Optional[np.ndarray]] = []
 
         for t in self.tickers_all:
             tdir = exp_dir / "tickers" / t
             X = np.load(tdir / "features.npy", mmap_mode="r")
             y = np.load(tdir / "labels.npy", mmap_mode="r")
             ts = np.load(tdir / "timestamps.npy", mmap_mode="r")
+            market_data_path = tdir / "market_data.npy"
+            market_data = np.load(market_data_path, mmap_mode="r") if market_data_path.exists() else None
 
             meta_path = tdir / "label_metadata.jsonl"
             if meta_path.exists():
@@ -57,8 +63,10 @@ class PreparedStore:
             self._labels.append(y)
             self._timestamps.append(ts)
             self._label_metadata.append(md)
+            self._market_data.append(market_data)
 
         self.n_features = int(self._features[0].shape[1])
+        self.has_market_data = all(data is not None for data in self._market_data)
 
     def ticker(self, tid: int) -> str:
         """Return the ticker symbol for a numeric ticker id."""
@@ -88,6 +96,31 @@ class PreparedStore:
             tpos = int(index[i, 1])
             out.append(self.metadata(tid, tpos))
         return out
+
+    def market_data(self, tid: int) -> Optional[Dict[str, np.ndarray]]:
+        """Return sampled raw OHLCV arrays for a ticker when available."""
+        market_data = self._market_data[int(tid)]
+        if market_data is None:
+            return None
+
+        return {
+            "timestamp": self._timestamps[int(tid)],
+            **{
+                column: market_data[:, idx]
+                for idx, column in enumerate(self.MARKET_DATA_COLUMNS)
+            },
+        }
+
+    def require_market_data(self, tid: int) -> Dict[str, np.ndarray]:
+        """Return sampled raw OHLCV arrays for a ticker or raise a clear error."""
+        market_data = self.market_data(tid)
+        if market_data is None:
+            ticker = self.ticker(tid)
+            raise RuntimeError(
+                f"Prepared market data is missing for ticker {ticker}. "
+                "Regenerate the prepared experiment so market_data.npy is persisted for backtesting."
+            )
+        return market_data
 
 
 class IndexWindowDataset(Dataset):

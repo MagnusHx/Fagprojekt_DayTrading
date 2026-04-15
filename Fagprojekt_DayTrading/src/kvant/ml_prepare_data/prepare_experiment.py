@@ -15,7 +15,7 @@ import tqdm
 from kvant.labels import label_semantics_payload
 from kvant.ml_prepare_data.labelling.tripple_bar import Labeler, TripleBarrierLabeler
 from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
-from kvant.ml_prepare_data.reporting import report_sampling_density
+from kvant.ml_prepare_data.reporting import report_sample_labeling, report_sampling_density
 from kvant.ml_prepare_data.samplers.sampler_cumsum import TunedCUSUMBarSampler
 from typing import Dict, Optional, List  # add Any, List
 from kvant.kdata.hf_minute_data import (
@@ -24,6 +24,8 @@ from kvant.kdata.hf_minute_data import (
     get_huggingface_top_20_normal_splits,
 )
 from kvant.ml_prepare_data.dataset_preparation_utils import ensure_utc_sorted_index
+
+MARKET_DATA_COLUMNS = ("open", "high", "low", "close", "volume")
 
 
 # ============================================================
@@ -82,12 +84,15 @@ def save_ticker_artifacts(
     y: np.ndarray,
     ts: np.ndarray,
     meta: dict,
+    market_data: Optional[np.ndarray] = None,
     label_metadata: Optional[list[Optional[dict]]] = None,
 ) -> None:
     tdir.mkdir(parents=True, exist_ok=True)
     np.save(tdir / "features.npy", X.astype(np.float32, copy=False))
     np.save(tdir / "labels.npy", y.astype(np.int8, copy=False))
     np.save(tdir / "timestamps.npy", ts.astype("datetime64[ns]", copy=False))
+    if market_data is not None:
+        np.save(tdir / "market_data.npy", market_data.astype(np.float32, copy=False))
     (tdir / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
 
     if label_metadata is not None:
@@ -323,27 +328,23 @@ def prepare_experiment(
         json.dumps(sampler_per_ticker_meta, indent=2, default=_json_default)
     )
 
-    def _iter_sampled_train_chunks(progress_desc: str | None = None):
-        iterator = tickers_train
-        if progress_desc is not None:
-            iterator = tqdm.tqdm(tickers_train, desc=progress_desc, dynamic_ncols=True)
-        assert iterator is not None
-        for ticker in iterator:
-            dft = ticker_dfs_train.get(ticker)
-            if dft is None or len(dft) == 0:
-                continue
-            dft = ensure_utc_sorted_index(dft)
-            dft_s = sampler.transform(dft, ticker=ticker)
-            if dft_s is None or len(dft_s) == 0:
-                continue
-            yield ensure_utc_sorted_index(dft_s)
+    sampled_train_chunks: dict[str, pd.DataFrame] = {}
 
-    # 3) Sample TRAIN ticker-by-ticker and fit the feature engineer without
-    #    materializing one giant concatenated training DataFrame.
+    # 3) Sample TRAIN ticker-by-ticker once and reuse the sampled chunks for
+    #    feature fitting instead of re-running the sampler over the same data.
     print(f"[{exp_id}] Sampling train data for feature fitting...")
     sampled_train_count = 0
     df_fit_sampled = None
-    for dft_s in _iter_sampled_train_chunks(progress_desc="Sampling train chunks"):
+    for ticker in tqdm.tqdm(tickers_train, desc="Sampling train chunks", dynamic_ncols=True):
+        dft = ticker_dfs_train.get(ticker)
+        if dft is None or len(dft) == 0:
+            continue
+        dft = ensure_utc_sorted_index(dft)
+        dft_s = sampler.transform(dft, ticker=ticker)
+        if dft_s is None or len(dft_s) == 0:
+            continue
+        dft_s = ensure_utc_sorted_index(dft_s)
+        sampled_train_chunks[ticker] = dft_s
         sampled_train_count += int(len(dft_s))
         if df_fit_sampled is None:
             df_fit_sampled = dft_s
@@ -357,9 +358,9 @@ def prepare_experiment(
     # 4) Fit FE + labeler on sampled train
     print(f"[{exp_id}] Fitting feature engineer and labeler...")
     if hasattr(fe, "fit_many"):
-        fe.fit_many(_iter_sampled_train_chunks(progress_desc="FE fit chunks"))
+        fe.fit_many(sampled_train_chunks[ticker] for ticker in tickers_train if ticker in sampled_train_chunks)
     else:
-        df_fit_sampled = pd.concat(list(_iter_sampled_train_chunks()), axis=0)
+        df_fit_sampled = pd.concat([sampled_train_chunks[ticker] for ticker in tickers_train if ticker in sampled_train_chunks], axis=0)
         fe.fit(df_fit_sampled)
     labeler.fit(df_fit_sampled)
     # --------------------------------------------------------
@@ -458,6 +459,7 @@ def prepare_experiment(
             "ticker": t,
             "membership": membership,
             "feature_names": feat_names,
+            "market_data_columns": list(MARKET_DATA_COLUMNS),
             "sampler_name": sampler.name,
             "sampler_global_meta": sampler_global_meta,
             "sampler_ticker_meta": sampler.get_ticker_meta(t),
@@ -483,7 +485,8 @@ def prepare_experiment(
             "n_valid_test": int(n_valid_test),
         }
 
-        save_ticker_artifacts(tickers_root / t, X, y, ts, meta, label_metadata=y_meta)
+        market_data = df1.loc[:, list(MARKET_DATA_COLUMNS)].to_numpy(dtype=np.float32, copy=True)
+        save_ticker_artifacts(tickers_root / t, X, y, ts, meta, market_data=market_data, label_metadata=y_meta)
 
     # Persist global density summary
     (exp_dir / "density_summary.json").write_text(json.dumps(density_summary_rows, indent=2, default=_json_default))
@@ -514,6 +517,8 @@ def prepare_experiment(
     np.save(exp_dir / "index_train.npy", index_train)
     np.save(exp_dir / "index_val.npy", index_val)
     np.save(exp_dir / "index_test.npy", index_test)
+
+    report_sample_labeling(exp_dir, tickers=tickers_train or tickers_all)
 
     print(f"[{exp_id}] Finished preparing experiment.")
     print("Prepared indices:")

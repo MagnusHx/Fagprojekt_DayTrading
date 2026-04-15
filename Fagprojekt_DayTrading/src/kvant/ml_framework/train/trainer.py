@@ -157,10 +157,7 @@ class Trainer:
             tspend["eval"].append(time.time() - t0)
 
             if self.logger is not None:
-                scalar_metrics = {
-                    k: v for k, v in metrics.items() if not str(k).startswith("_")
-                }
-                self.logger.log(scalar_metrics, step=ep)
+                self.logger.log(dict(metrics), step=ep)
 
             metric_val = float(metrics.get(cfg.checkpoint_metric, -float("inf")))
             if metric_val > best_metric:
