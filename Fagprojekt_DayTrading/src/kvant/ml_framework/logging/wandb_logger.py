@@ -11,7 +11,12 @@ import pandas as pd
 import wandb
 import matplotlib.pyplot as plt
 
-from kvant.labels import CLASS_NAMES, LABEL_MEANINGS
+from kvant.labels import (
+    class_names_from_semantics,
+    label_ids_from_semantics,
+    label_meanings_from_semantics,
+    label_semantics_payload,
+)
 
 
 def _safe_int(x: Any, default: int = 0) -> int:
@@ -30,7 +35,7 @@ def _to_float_or_nan(x: Any) -> float:
         return float("nan")
 
 
-def _plot_confusion_heatmap(cm: np.ndarray, title: str) -> plt.Figure:
+def _plot_confusion_heatmap(cm: np.ndarray, title: str, class_names: List[str]) -> plt.Figure:
     """
     cm: (C,C) int array. Produces a heatmap with:
       - cell text: "count\n(percent of row)"
@@ -47,10 +52,10 @@ def _plot_confusion_heatmap(cm: np.ndarray, title: str) -> plt.Figure:
     ax.set_title(title)
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
-    ax.set_xticks(range(len(CLASS_NAMES)))
-    ax.set_yticks(range(len(CLASS_NAMES)))
-    ax.set_xticklabels(CLASS_NAMES, rotation=25, ha="right")
-    ax.set_yticklabels(CLASS_NAMES)
+    ax.set_xticks(range(len(class_names)))
+    ax.set_yticks(range(len(class_names)))
+    ax.set_xticklabels(class_names, rotation=25, ha="right")
+    ax.set_yticklabels(class_names)
 
     # annotate
     for i in range(cm.shape[0]):
@@ -96,14 +101,12 @@ def _parse_ts(x: Any) -> pd.Timestamp | None:
     return ts
 
 
-def _plot_split_class_balance(split_stats: Dict[str, dict]) -> plt.Figure:
+def _plot_split_class_balance(split_stats: Dict[str, dict], class_ids: tuple[int, ...], class_names: List[str]) -> plt.Figure:
     splits = [s for s in ["train", "val", "test"] if s in split_stats]
-    cls_ids = [0, 1, 2]
-    cls_labels = [CLASS_NAMES[c] for c in cls_ids]
     x = np.arange(len(splits))
 
     counts = np.array(
-        [[int((split_stats[s].get("y_counts", {}) or {}).get(c, 0)) for s in splits] for c in cls_ids], dtype=np.float64
+        [[int((split_stats[s].get("y_counts", {}) or {}).get(c, 0)) for s in splits] for c in class_ids], dtype=np.float64
     )
     totals = counts.sum(axis=0, keepdims=True)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -112,7 +115,7 @@ def _plot_split_class_balance(split_stats: Dict[str, dict]) -> plt.Figure:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), dpi=140)
 
     bottom = np.zeros(len(splits), dtype=np.float64)
-    for i, cls_label in enumerate(cls_labels):
+    for i, cls_label in enumerate(class_names):
         axes[0].bar(x, counts[i], bottom=bottom, label=cls_label)
         bottom += counts[i]
     axes[0].set_title("Class counts by split")
@@ -120,7 +123,7 @@ def _plot_split_class_balance(split_stats: Dict[str, dict]) -> plt.Figure:
     axes[0].set_ylabel("samples")
 
     bottom = np.zeros(len(splits), dtype=np.float64)
-    for i, cls_label in enumerate(cls_labels):
+    for i, cls_label in enumerate(class_names):
         axes[1].bar(x, 100.0 * shares[i], bottom=100.0 * bottom, label=cls_label)
         bottom += shares[i]
     axes[1].set_title("Class share by split")
@@ -206,7 +209,12 @@ def _plot_split_expansion(split_stats: Dict[str, dict]) -> plt.Figure:
     return fig
 
 
-def _plot_top_ticker_class_balance(per_ticker_rows: List[dict], top_n: int = 12) -> plt.Figure:
+def _plot_top_ticker_class_balance(
+    per_ticker_rows: List[dict],
+    class_ids: tuple[int, ...],
+    class_names: List[str],
+    top_n: int = 12,
+) -> plt.Figure:
     ranked = sorted(per_ticker_rows, key=lambda r: int(r.get("n", 0)), reverse=True)[:top_n]
     fig, ax = plt.subplots(figsize=(12, 5.5), dpi=140)
     if not ranked:
@@ -215,14 +223,17 @@ def _plot_top_ticker_class_balance(per_ticker_rows: List[dict], top_n: int = 12)
         return fig
 
     tickers = [str(r["ticker"]) for r in ranked]
-    cls0 = np.array([int(r.get("y_count_0", 0)) for r in ranked], dtype=float)
-    cls1 = np.array([int(r.get("y_count_1", 0)) for r in ranked], dtype=float)
-    cls2 = np.array([int(r.get("y_count_2", 0)) for r in ranked], dtype=float)
-    total = np.maximum(cls0 + cls1 + cls2, 1.0)
+    class_counts = [
+        np.array([int(r.get(f"y_count_{label}", 0)) for r in ranked], dtype=float)
+        for label in class_ids
+    ]
+    total = np.maximum(np.sum(class_counts, axis=0), 1.0)
 
-    ax.bar(tickers, 100.0 * cls0 / total, label=CLASS_NAMES[0])
-    ax.bar(tickers, 100.0 * cls1 / total, bottom=100.0 * cls0 / total, label=CLASS_NAMES[1])
-    ax.bar(tickers, 100.0 * cls2 / total, bottom=100.0 * (cls0 + cls1) / total, label=CLASS_NAMES[2])
+    bottom = np.zeros(len(ranked), dtype=float)
+    for idx, cls_label in enumerate(class_names):
+        share = 100.0 * class_counts[idx] / total
+        ax.bar(tickers, share, bottom=bottom, label=cls_label)
+        bottom += share
     ax.set_title(f"Class balance for top {len(ranked)} tickers by sample count")
     ax.set_ylabel("percent")
     ax.set_ylim(0.0, 100.0)
@@ -299,6 +310,10 @@ class WandbLogger:
         # ticker_label -> list of epoch dicts
         self._ticker_history: Dict[str, List[Dict[str, Any]]] = {}
         self._tickers_to_chart: List[str] = []
+        default_semantics = label_semantics_payload(drop_time_exit_label=False)
+        self._class_ids = label_ids_from_semantics(default_semantics)
+        self._class_names = class_names_from_semantics(default_semantics)
+        self._label_meanings = label_meanings_from_semantics(default_semantics)
         self._define_default_metrics()
 
     def _define_default_metrics(self) -> None:
@@ -346,10 +361,14 @@ class WandbLogger:
         wandb.log(self._qualify_metrics(metrics), step=self._normalize_step(self._SETUP_STEP))
 
     def setup(self, *, exp: Any, loaders: Dict[str, Any]) -> None:
+        self._class_ids = tuple(getattr(exp.store, "label_ids", self._class_ids))
+        self._class_names = list(getattr(exp.store, "class_names", self._class_names))
+        self._label_meanings = dict(getattr(exp.store, "label_meanings", self._label_meanings))
+
         # label meanings
-        self.run.config.update({"label_meanings": LABEL_MEANINGS}, allow_val_change=True)
+        self.run.config.update({"label_meanings": self._label_meanings}, allow_val_change=True)
         label_table = wandb.Table(columns=["y", "meaning"])
-        for y, meaning in LABEL_MEANINGS.items():
+        for y, meaning in self._label_meanings.items():
             label_table.add_data(int(y), str(meaning))
         self._log_static({"data/label_meanings": label_table})
 
@@ -367,7 +386,9 @@ class WandbLogger:
 
         # split distribution table (static)
         # (Assumes ds.summary exists; if you truly want to use ds.display instead, tell me what it returns.)
-        dist_table = wandb.Table(columns=["split", "n", "first_ts", "last_ts", "y_count_0", "y_count_1", "y_count_2"])
+        dist_table = wandb.Table(
+            columns=["split", "n", "first_ts", "last_ts", *[f"y_count_{label}" for label in self._class_ids]]
+        )
         split_stats: Dict[str, dict] = {}
         per_ticker_balance_rows: List[dict] = []
         for split, loader in loaders.items():
@@ -383,30 +404,25 @@ class WandbLogger:
                 _safe_int(overall.get("n", 0)),
                 overall.get("first_ts", None),
                 overall.get("last_ts", None),
-                _safe_int(yc.get(0, 0)),
-                _safe_int(yc.get(1, 0)),
-                _safe_int(yc.get(2, 0)),
+                *[_safe_int(yc.get(label, 0)) for label in self._class_ids],
             )
 
             for ticker, row in sorted((s.get("per_ticker", {}) or {}).items()):
                 yct = row.get("y_counts", {}) or {}
                 n = _safe_int(row.get("n", 0))
-                per_ticker_balance_rows.append(
-                    {
-                        "split": str(split),
-                        "ticker": str(ticker),
-                        "tid": _safe_int(row.get("tid", -1), default=-1),
-                        "n": n,
-                        "first_ts": row.get("first_ts"),
-                        "last_ts": row.get("last_ts"),
-                        "y_count_0": _safe_int(yct.get(0, 0)),
-                        "y_count_1": _safe_int(yct.get(1, 0)),
-                        "y_count_2": _safe_int(yct.get(2, 0)),
-                        "y_pct_0": _safe_pct(_safe_int(yct.get(0, 0)), n),
-                        "y_pct_1": _safe_pct(_safe_int(yct.get(1, 0)), n),
-                        "y_pct_2": _safe_pct(_safe_int(yct.get(2, 0)), n),
-                    }
-                )
+                balance_row = {
+                    "split": str(split),
+                    "ticker": str(ticker),
+                    "tid": _safe_int(row.get("tid", -1), default=-1),
+                    "n": n,
+                    "first_ts": row.get("first_ts"),
+                    "last_ts": row.get("last_ts"),
+                }
+                for label in self._class_ids:
+                    count = _safe_int(yct.get(label, 0))
+                    balance_row[f"y_count_{label}"] = count
+                    balance_row[f"y_pct_{label}"] = _safe_pct(count, n)
+                per_ticker_balance_rows.append(balance_row)
         self._log_static({"data/split_distribution": dist_table})
 
         balance_table = wandb.Table(
@@ -417,12 +433,8 @@ class WandbLogger:
                 "n",
                 "first_ts",
                 "last_ts",
-                "y_count_0",
-                "y_count_1",
-                "y_count_2",
-                "y_pct_0",
-                "y_pct_1",
-                "y_pct_2",
+                *[f"y_count_{label}" for label in self._class_ids],
+                *[f"y_pct_{label}" for label in self._class_ids],
             ]
         )
         for row in per_ticker_balance_rows:
@@ -433,16 +445,12 @@ class WandbLogger:
                 row["n"],
                 row["first_ts"],
                 row["last_ts"],
-                row["y_count_0"],
-                row["y_count_1"],
-                row["y_count_2"],
-                row["y_pct_0"],
-                row["y_pct_1"],
-                row["y_pct_2"],
+                *[row[f"y_count_{label}"] for label in self._class_ids],
+                *[row[f"y_pct_{label}"] for label in self._class_ids],
             )
         self._log_static({"data/per_ticker_class_balance": balance_table})
 
-        fig = _plot_split_class_balance(split_stats)
+        fig = _plot_split_class_balance(split_stats, self._class_ids, self._class_names)
         self._log_static({"charts/data/class_balance_by_split": wandb.Image(fig)})
         plt.close(fig)
 
@@ -454,7 +462,11 @@ class WandbLogger:
         self._log_static({"charts/data/split_expansion": wandb.Image(fig)})
         plt.close(fig)
 
-        fig = _plot_top_ticker_class_balance([r for r in per_ticker_balance_rows if r["split"] == "train"])
+        fig = _plot_top_ticker_class_balance(
+            [r for r in per_ticker_balance_rows if r["split"] == "train"],
+            self._class_ids,
+            self._class_names,
+        )
         self._log_static({"charts/data/top_ticker_train_class_balance": wandb.Image(fig)})
         plt.close(fig)
 
@@ -525,7 +537,11 @@ class WandbLogger:
             for split, cm in confusion_counts.items():
                 if cm is None:
                     continue
-                fig = _plot_confusion_heatmap(np.asarray(cm), title=f"Confusion matrix ({split})")
+                fig = _plot_confusion_heatmap(
+                    np.asarray(cm),
+                    title=f"Confusion matrix ({split})",
+                    class_names=self._class_names,
+                )
                 wandb.log({self._qualify_key(f"charts/confusion_matrix/{split}"): wandb.Image(fig)}, step=step)
                 wandb.log(
                     {

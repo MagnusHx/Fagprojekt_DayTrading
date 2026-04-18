@@ -15,7 +15,7 @@ import tqdm
 from kvant.labels import label_semantics_payload
 from kvant.ml_prepare_data.labelling.tripple_bar import Labeler, TripleBarrierLabeler
 from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
-from kvant.ml_prepare_data.reporting import report_sample_labeling, report_sampling_density
+from kvant.ml_prepare_data.reporting import report_sampling_density, report_sampling_timeline
 from kvant.ml_prepare_data.samplers.sampler_cumsum import TunedCUSUMBarSampler
 from typing import Dict, Optional, List  # add Any, List
 from kvant.kdata.hf_minute_data import (
@@ -38,7 +38,7 @@ class ExperimentConfig:
     feature_engineer: dict
     labeler: dict
     lookback_L: int
-    label_semantics: dict = field(default_factory=label_semantics_payload)
+    label_semantics: dict = field(default_factory=lambda: label_semantics_payload(drop_time_exit_label=False))
 
     def stable_id(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, default=str).encode("utf-8")
@@ -370,6 +370,7 @@ def prepare_experiment(
 
     # global diagnostics accumulator
     density_summary_rows: list[dict] = []
+    sampling_examples: list[dict] = []
 
     print(f"[{exp_id}] Preparing ticker artifacts...")
     for t in tqdm.tqdm(tickers_all, desc="Preparing tickers", dynamic_ncols=True):
@@ -454,6 +455,22 @@ def prepare_experiment(
             "sampler_ticker_meta": sampler.get_ticker_meta(t),
         }
         density_summary_rows.append(density_row)
+        sampling_examples.append(
+            {
+                "ticker": t,
+                "raw_timestamps": ts_raw.copy(),
+                "raw_close": df_full_raw["close"].to_numpy(dtype=np.float64, copy=True),
+                "sampled_timestamps": ts.copy(),
+                "sampled_close": df1["close"].to_numpy(dtype=np.float64, copy=True),
+                "val_start": val_start,
+                "test_start": test_start,
+                "n_raw_full": n_raw_full,
+                "n_sampled_full": n_sampled_full,
+                "retention_ratio": retention,
+                "bars_per_day_raw": density_row["bars_per_day_raw"],
+                "bars_per_day_sampled": density_row["bars_per_day_sampled"],
+            }
+        )
 
         meta = {
             "ticker": t,
@@ -518,7 +535,7 @@ def prepare_experiment(
     np.save(exp_dir / "index_val.npy", index_val)
     np.save(exp_dir / "index_test.npy", index_test)
 
-    report_sample_labeling(exp_dir, tickers=tickers_train or tickers_all)
+    report_sampling_timeline(exp_dir, sampling_examples=sampling_examples, max_tickers=4)
 
     print(f"[{exp_id}] Finished preparing experiment.")
     print("Prepared indices:")
@@ -548,6 +565,7 @@ def prepare_single_dataset(dataset_split: DownloadedDatasetSplit, sampler, featu
         feature_engineer=asdict(feature_engineer),
         labeler=asdict(labeler),
         lookback_L=L,
+        label_semantics=label_semantics_payload(drop_time_exit_label=bool(getattr(labeler, "drop_time_exit_label", False))),
     )
     out_root = Path("../ml_framework/prepared")
     prepared = prepare_experiment(
@@ -572,7 +590,9 @@ def main():
 
     TBPD = 30
     L, width, height_pct = 12, 180, 1.5
-    label = f"sb_L_{L}_w{width}_h{height_pct}_TBPD{TBPD}"
+    drop_time_exit_label = True
+    label_suffix = "_droptexit" if drop_time_exit_label else ""
+    label = f"sb_L_{L}_w{width}_h{height_pct}_TBPD{TBPD}{label_suffix}"
     print(f"Writing to {label=}")
 
     from kvant.ml_prepare_data import prepared_data_root
@@ -592,7 +612,7 @@ def main():
         )
         fe = StandardizedFeatures(base=base_fe)
         labeler = TripleBarrierLabeler(
-            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=False
+            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=drop_time_exit_label
         )
 
         cfg = ExperimentConfig(
@@ -601,6 +621,7 @@ def main():
             feature_engineer=asdict(fe),
             labeler=asdict(labeler),
             lookback_L=L,
+            label_semantics=label_semantics_payload(drop_time_exit_label=drop_time_exit_label),
         )
 
         fold_id = f"{label}_fold{fold_idx:02d}"
@@ -615,7 +636,7 @@ def main():
             ticker_dfs_test=ticker_data_test,
             experiment_id=fold_id,
         )
-        report_sampling_density(prepared.exp_dir, bins=60, print_table=True)
+        report_sampling_density(prepared.exp_dir, bins=60, print_table=True, max_plot_tickers=4)
         print("Experiment prepared at:", prepared.exp_dir)
         last_prepared = prepared
 

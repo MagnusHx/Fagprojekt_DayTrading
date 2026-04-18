@@ -43,6 +43,8 @@ class TripleBarrierLabeler:
             if self.drop_time_exit_label and lab == 1:
                 # keep label invalid; metadata remains available
                 continue
+            if self.drop_time_exit_label and lab == 2:
+                lab = 1
             labels[i] = lab
 
         return labels, metadata

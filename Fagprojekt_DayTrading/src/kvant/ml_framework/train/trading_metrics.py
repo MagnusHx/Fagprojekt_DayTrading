@@ -73,8 +73,14 @@ def trade_decision_components(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return action probability and directional confidence from class probabilities."""
     y_pred_proba = np.asarray(y_pred_proba, dtype=np.float64)
-    if y_pred_proba.ndim != 2 or y_pred_proba.shape[1] < 3:
-        raise ValueError("y_pred_proba must have shape (n_samples, 3)")
+    if y_pred_proba.ndim != 2 or y_pred_proba.shape[1] not in (2, 3):
+        raise ValueError("y_pred_proba must have shape (n_samples, 2) or (n_samples, 3)")
+
+    if y_pred_proba.shape[1] == 2:
+        p_down = y_pred_proba[:, 0]
+        q_up = y_pred_proba[:, 1]
+        p_act = np.ones(len(q_up), dtype=np.float64)
+        return p_act, q_up
 
     p_down = y_pred_proba[:, LABEL_DOWN]
     p_up = y_pred_proba[:, LABEL_UP]

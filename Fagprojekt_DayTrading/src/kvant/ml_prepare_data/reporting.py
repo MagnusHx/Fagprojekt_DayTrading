@@ -6,6 +6,13 @@ from typing import Optional, List
 import numpy as np
 import pandas as pd
 
+
+def _artifacts_dir_for_experiment(exp_dir: Path) -> Path:
+    project_root = Path(__file__).resolve().parents[3]
+    out_dir = project_root / "artifacts" / "data_prep" / exp_dir.name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text())
 
@@ -77,11 +84,12 @@ def report_sampling_density(
     tickers: Optional[List[str]] = None,
     bins: int = 50,
     print_table: bool = True,
+    max_plot_tickers: int = 6,
 ) -> pd.DataFrame:
     """
     Reads prepared artifacts from exp_dir and produces:
       - per-ticker daily counts CSV
-      - per-ticker histogram PNG of daily samples
+      - a combined histogram PNG for a small sample of tickers
       - global histogram PNG over all ticker-days
       - global histogram PNG over per-ticker mean samples/day
 
@@ -93,10 +101,12 @@ def report_sampling_density(
 
     out_report_dir = exp_dir / "reports"
     out_report_dir.mkdir(parents=True, exist_ok=True)
+    out_plot_dir = _artifacts_dir_for_experiment(exp_dir)
 
     rows = []
     all_daily_values = []
     per_ticker_means = []
+    sample_plot_rows: list[tuple[str, np.ndarray, float, int]] = []
 
     for t in tickers:
         tdir = tickers_root / t
@@ -123,14 +133,6 @@ def report_sampling_density(
         counts_csv = out_report_dir / f"{t}_samples_per_day.csv"
         counts.to_csv(counts_csv, header=True)
 
-        # Per-ticker histogram
-        _save_hist_png(
-            counts.to_numpy(dtype=float),
-            out_report_dir / f"{t}_samples_per_day_hist.png",
-            title=f"{t}: samples/day distribution (n_days={n_days}, mean={mean_bpd:.2f})",
-            bins=bins,
-        )
-
         retention = None
         if isinstance(n_raw, (int, float)) and n_raw and n_sampled is not None:
             retention = float(n_sampled) / float(n_raw)
@@ -146,6 +148,8 @@ def report_sampling_density(
             "samples_per_day_min": float(counts.min()) if n_days else 0.0,
             "samples_per_day_max": float(counts.max()) if n_days else 0.0,
         })
+        if len(sample_plot_rows) < max(1, int(max_plot_tickers)):
+            sample_plot_rows.append((t, counts.to_numpy(dtype=float), mean_bpd, n_days))
 
     df = pd.DataFrame(rows).sort_values(["samples_per_day_mean", "ticker"], ascending=[False, True])
     df.to_csv(out_report_dir / "sampling_report.csv", index=False)
@@ -158,7 +162,7 @@ def report_sampling_density(
 
     _save_hist_png(
         all_vals,
-        out_report_dir / "ALL_TICKERS_samples_per_day_hist.png",
+        out_plot_dir / "ALL_TICKERS_samples_per_day_hist.png",
         title=f"ALL TICKERS: samples/day distribution over ticker-days (n={len(all_vals)})",
         bins=bins,
     )
@@ -166,10 +170,42 @@ def report_sampling_density(
     # Global hist: per-ticker mean samples/day (one value per ticker)
     _save_hist_png(
         np.asarray(per_ticker_means, dtype=float),
-        out_report_dir / "PER_TICKER_mean_samples_per_day_hist.png",
+        out_plot_dir / "PER_TICKER_mean_samples_per_day_hist.png",
         title=f"PER TICKER: mean samples/day (n_tickers={len(per_ticker_means)})",
         bins=min(bins, max(10, len(per_ticker_means))),
     )
+
+    if sample_plot_rows:
+        try:
+            import matplotlib.pyplot as plt
+        except Exception:
+            sample_payload = {
+                "tickers": [ticker for ticker, *_ in sample_plot_rows],
+                "error": "matplotlib unavailable",
+            }
+            (out_plot_dir / "sample_ticker_samples_per_day_hist.json").write_text(json.dumps(sample_payload, indent=2))
+        else:
+            n = len(sample_plot_rows)
+            n_cols = min(2, n)
+            n_rows = int(np.ceil(n / n_cols))
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 4.5 * n_rows), dpi=140, squeeze=False)
+            fig.suptitle("Sample ticker sampling-density histograms", fontsize=14)
+            for ax in axes.flat[n:]:
+                ax.axis("off")
+            for ax, (ticker, values, mean_bpd, n_days) in zip(axes.flat, sample_plot_rows):
+                values = np.asarray(values, dtype=float)
+                values = values[np.isfinite(values)]
+                if len(values) == 0:
+                    ax.text(0.5, 0.5, f"No values for {ticker}", ha="center", va="center")
+                    ax.axis("off")
+                    continue
+                ax.hist(values, bins=bins, edgecolor="black", alpha=0.85)
+                ax.set_title(f"{ticker} (n_days={n_days}, mean={mean_bpd:.2f})")
+                ax.set_xlabel("samples per day")
+                ax.set_ylabel("number of days")
+            fig.tight_layout(rect=(0, 0, 1, 0.97))
+            fig.savefig(out_plot_dir / "sample_ticker_samples_per_day_hist.png", dpi=140)
+            plt.close(fig)
 
     if print_table and len(df):
         # Pretty minimal console table
@@ -194,8 +230,7 @@ def report_sample_labeling(
     The plots are based on the saved sampled raw market data and corresponding labels.
     """
     tickers_root = exp_dir / "tickers"
-    reports_dir = exp_dir / "reports" / "labeling_samples"
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = _artifacts_dir_for_experiment(exp_dir)
 
     if tickers is None:
         preferred = exp_dir / "tickers_train.json"
@@ -215,7 +250,7 @@ def report_sample_labeling(
             "max_points_per_ticker": int(max_points_per_ticker),
             "error": "matplotlib unavailable",
         }
-        out_path = reports_dir / "labeling_samples.json"
+        out_path = out_dir / "labeling_samples.json"
         out_path.write_text(json.dumps(payload, indent=2))
         return [out_path]
 
@@ -291,22 +326,131 @@ def report_sample_labeling(
             bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.9},
         )
 
-        ticker_out = reports_dir / f"{ticker}_labeling.png"
-        ticker_fig, ticker_ax = plt.subplots(figsize=(16, 5), dpi=140)
-        ticker_ax.plot(timestamps, close, color="#999999", linewidth=1.0, alpha=0.7)
-        ticker_ax.scatter(timestamps, close, c=colors, s=10, linewidths=0)
-        ticker_ax.set_title(f"Sample labeling for {ticker}")
-        ticker_ax.set_xlabel("time (UTC)")
-        ticker_ax.set_ylabel("close")
-        ticker_ax.grid(alpha=0.2)
-        ticker_ax.legend(handles=legend_handles, loc="upper left", frameon=False)
-        ticker_fig.tight_layout()
-        ticker_fig.savefig(ticker_out, dpi=140)
-        plt.close(ticker_fig)
-        out_paths.append(ticker_out)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    combined_out = out_dir / "labeling_sample_tickers.png"
+    fig.savefig(combined_out, dpi=140)
+    plt.close(fig)
+    out_paths.append(combined_out)
+    return out_paths
+
+
+def report_sampling_timeline(
+    exp_dir: Path,
+    *,
+    sampling_examples: List[dict],
+    max_tickers: int = 6,
+    max_raw_points_per_ticker: int = 5000,
+    max_sampled_points_per_ticker: int = 2500,
+) -> list[Path]:
+    """
+    Create plots showing how sampling behaves over time by overlaying sampled bars
+    on top of the original raw close series.
+
+    Expected sampling_examples item:
+      {
+        "ticker": str,
+        "raw_timestamps": np.ndarray,
+        "raw_close": np.ndarray,
+        "sampled_timestamps": np.ndarray,
+        "sampled_close": np.ndarray,
+        "val_start": Optional[np.datetime64],
+        "test_start": Optional[np.datetime64],
+        "n_raw_full": int,
+        "n_sampled_full": int,
+        "retention_ratio": float,
+        "bars_per_day_raw": float,
+        "bars_per_day_sampled": float,
+      }
+    """
+    out_dir = _artifacts_dir_for_experiment(exp_dir)
+
+    sampling_examples = list(sampling_examples)[: max(1, int(max_tickers))]
+    out_paths: list[Path] = []
+
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
+    except Exception:
+        payload = {
+            "tickers": [row.get("ticker") for row in sampling_examples],
+            "error": "matplotlib unavailable",
+        }
+        out_path = out_dir / "sampling_timeline.json"
+        out_path.write_text(json.dumps(payload, indent=2))
+        return [out_path]
+
+    split_color = {
+        "train": "#4C956C",
+        "val": "#F4A259",
+        "test": "#BC4B51",
+    }
+    legend_handles = [
+        Line2D([0], [0], color="#BBBBBB", linewidth=1.0, label="Raw close"),
+        Line2D([0], [0], marker="o", color="w", label="Sampled train", markerfacecolor=split_color["train"], markersize=6),
+        Line2D([0], [0], marker="o", color="w", label="Sampled val", markerfacecolor=split_color["val"], markersize=6),
+        Line2D([0], [0], marker="o", color="w", label="Sampled test", markerfacecolor=split_color["test"], markersize=6),
+    ]
+
+    n_cols = min(2, len(sampling_examples))
+    n_rows = int(np.ceil(len(sampling_examples) / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4.8 * n_rows), dpi=140, squeeze=False)
+    fig.suptitle("Sampling over time", fontsize=14)
+
+    for ax in axes.flat[len(sampling_examples) :]:
+        ax.axis("off")
+
+    for idx, row in enumerate(sampling_examples):
+        ticker = str(row["ticker"])
+        ax = axes.flat[idx]
+
+        raw_ts = pd.to_datetime(np.asarray(row["raw_timestamps"])[:max_raw_points_per_ticker], utc=True)
+        raw_close = np.asarray(row["raw_close"][:max_raw_points_per_ticker], dtype=np.float64)
+
+        sampled_ts_full = pd.to_datetime(np.asarray(row["sampled_timestamps"]), utc=True)
+        sampled_close_full = np.asarray(row["sampled_close"], dtype=np.float64)
+        n_sampled = min(len(sampled_ts_full), int(max_sampled_points_per_ticker))
+        sampled_ts = sampled_ts_full[:n_sampled]
+        sampled_close = sampled_close_full[:n_sampled]
+
+        val_start = pd.Timestamp(row["val_start"]) if row.get("val_start") is not None else None
+        test_start = pd.Timestamp(row["test_start"]) if row.get("test_start") is not None else None
+
+        split_labels = []
+        for ts in sampled_ts:
+            if test_start is not None and ts >= test_start:
+                split_labels.append("test")
+            elif val_start is not None and ts >= val_start:
+                split_labels.append("val")
+            else:
+                split_labels.append("train")
+        colors = [split_color[s] for s in split_labels]
+
+        ax.plot(raw_ts, raw_close, color="#BBBBBB", linewidth=1.0, alpha=0.9)
+        ax.scatter(sampled_ts, sampled_close, c=colors, s=12, linewidths=0, alpha=0.95)
+        ax.set_title(f"{ticker} | sampled over raw")
+        ax.set_xlabel("time (UTC)")
+        ax.set_ylabel("close")
+        ax.grid(alpha=0.2)
+        ax.legend(handles=legend_handles, loc="upper left", frameon=False)
+
+        info_lines = [
+            f"Raw / Sampled: {int(row['n_raw_full']):,} / {int(row['n_sampled_full']):,}",
+            f"Retention: {100.0 * float(row['retention_ratio']):.2f}%",
+            f"Bars/day raw -> sampled: {float(row['bars_per_day_raw']):.2f} -> {float(row['bars_per_day_sampled']):.2f}",
+            f"Shown raw / sampled: {len(raw_ts):,} / {len(sampled_ts):,}",
+        ]
+        ax.text(
+            1.02,
+            0.98,
+            "\n".join(info_lines),
+            transform=ax.transAxes,
+            va="top",
+            fontsize=8,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.9},
+        )
 
     fig.tight_layout(rect=(0, 0, 1, 0.97))
-    combined_out = reports_dir / "labeling_sample_tickers.png"
+    combined_out = out_dir / "sampling_timeline_sample_tickers.png"
     fig.savefig(combined_out, dpi=140)
     plt.close(fig)
     out_paths.append(combined_out)

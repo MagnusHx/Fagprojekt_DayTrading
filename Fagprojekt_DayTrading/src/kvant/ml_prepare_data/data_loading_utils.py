@@ -1,4 +1,5 @@
 from typing import Any, Dict
+
 import numpy as np
 
 
@@ -8,28 +9,20 @@ def summary(self, display: bool = True) -> Dict[str, Any]:
 
     Computes per-ticker:
       - n: number of samples in this dataset for that ticker
-      - y_counts: counts of classes {0,1,2}
+      - y_counts: counts of classes present in the prepared artifact
       - first_ts / last_ts: timestamps at min/max tpos for that ticker
 
     Also computes an 'overall' summary aggregated across tickers.
-
-    If display=True, prints a tabulated report.
-
-    Returns a dict:
-      {
-        "overall": {...},
-        "per_ticker": {
-           "AAPL": {...},
-           ...
-        }
-      }
     """
-    # Defensive: empty dataset
+
+    label_ids = tuple(getattr(self.store, "label_ids", (0, 1, 2)))
+    bincount_size = (max(label_ids) + 1) if label_ids else 0
+
     if self.index is None or int(self.index.shape[0]) == 0:
         out = {
             "overall": {
                 "n": 0,
-                "y_counts": {0: 0, 1: 0, 2: 0},
+                "y_counts": {label: 0 for label in label_ids},
                 "first_ts": None,
                 "last_ts": None,
             },
@@ -38,40 +31,42 @@ def summary(self, display: bool = True) -> Dict[str, Any]:
         if display:
             try:
                 from tabulate import tabulate
-                print(tabulate([], headers=["ticker", "n", "y=0", "y=1", "y=2", "first_ts", "last_ts"]))
+
+                headers = ["ticker", "n", *[f"y={label}" for label in label_ids], "first_ts", "last_ts"]
+                print(tabulate([], headers=headers))
             except Exception:
                 print("(empty dataset)")
         return out
 
-    # Pull ids/positions
     tids = self.index[:, 0].astype(np.int64, copy=False)
     tposs = self.index[:, 1].astype(np.int64, copy=False)
     uniq_tids = np.unique(tids)
 
     per_ticker: Dict[str, Any] = {}
-
     overall_n = 0
-    overall_counts = np.zeros(3, dtype=np.int64)
-    overall_first_ts = None  # np.datetime64
-    overall_last_ts = None  # np.datetime64
+    overall_counts = {label: 0 for label in label_ids}
+    overall_first_ts = None
+    overall_last_ts = None
 
     for tid in uniq_tids:
         tid_i = int(tid)
         ticker = self.store.tickers_all[tid_i]
 
-        mask = (tids == tid)
+        mask = tids == tid
         pos = tposs[mask]
         n = int(pos.shape[0])
         overall_n += n
 
-        # Labels for those positions (fast: direct array indexing, no window extraction)
         y_arr = np.asarray(self.store._labels[tid_i][pos], dtype=np.int64)
-        # In case y contains unexpected values, we only count 0/1/2
-        y_arr = y_arr[(y_arr >= 0) & (y_arr <= 2)]
-        counts = np.bincount(y_arr, minlength=3).astype(np.int64)
-        overall_counts += counts
+        y_arr = y_arr[np.isin(y_arr, label_ids)]
+        if len(y_arr):
+            counts_arr = np.bincount(y_arr, minlength=bincount_size).astype(np.int64)
+        else:
+            counts_arr = np.zeros(bincount_size, dtype=np.int64)
+        counts = {label: int(counts_arr[label]) for label in label_ids}
+        for label in label_ids:
+            overall_counts[label] += counts[label]
 
-        # Timestamps: take min/max by position (position order corresponds to time)
         ts_arr = self.store._timestamps[tid_i]
         pmin = int(pos.min())
         pmax = int(pos.max())
@@ -86,7 +81,7 @@ def summary(self, display: bool = True) -> Dict[str, Any]:
         per_ticker[ticker] = {
             "tid": tid_i,
             "n": n,
-            "y_counts": {0: int(counts[0]), 1: int(counts[1]), 2: int(counts[2])},
+            "y_counts": counts,
             "first_ts": None if first_ts is None else str(np.datetime_as_string(first_ts, unit="s")),
             "last_ts": None if last_ts is None else str(np.datetime_as_string(last_ts, unit="s")),
         }
@@ -94,7 +89,7 @@ def summary(self, display: bool = True) -> Dict[str, Any]:
     out = {
         "overall": {
             "n": int(overall_n),
-            "y_counts": {0: int(overall_counts[0]), 1: int(overall_counts[1]), 2: int(overall_counts[2])},
+            "y_counts": {label: int(overall_counts[label]) for label in label_ids},
             "first_ts": None if overall_first_ts is None else str(np.datetime_as_string(overall_first_ts, unit="s")),
             "last_ts": None if overall_last_ts is None else str(np.datetime_as_string(overall_last_ts, unit="s")),
         },
@@ -105,35 +100,23 @@ def summary(self, display: bool = True) -> Dict[str, Any]:
         try:
             from tabulate import tabulate
 
-            # rows sorted by ticker symbol for stable display
+            headers = ["ticker", "n", *[f"y={label}" for label in label_ids], "first_ts", "last_ts"]
             rows = []
             for ticker in sorted(per_ticker.keys()):
                 d = per_ticker[ticker]
-                rows.append([
-                    ticker,
-                    d["n"],
-                    d["y_counts"][0],
-                    d["y_counts"][1],
-                    d["y_counts"][2],
-                    d["first_ts"],
-                    d["last_ts"],
-                ])
+                rows.append([ticker, d["n"], *[d["y_counts"][label] for label in label_ids], d["first_ts"], d["last_ts"]])
 
-            print(tabulate(
-                rows,
-                headers=["ticker", "n", "y=0", "y=1", "y=2", "first_ts", "last_ts"],
-                tablefmt="github",
-            ))
+            print(tabulate(rows, headers=headers, tablefmt="github"))
 
-            # overall line
             o = out["overall"]
             print("\nOverall:")
-            print(tabulate([[
-                o["n"], o["y_counts"][0], o["y_counts"][1], o["y_counts"][2], o["first_ts"], o["last_ts"]
-            ]],
-                headers=["n", "y=0", "y=1", "y=2", "first_ts", "last_ts"],
-                tablefmt="github",
-            ))
+            print(
+                tabulate(
+                    [[o["n"], *[o["y_counts"][label] for label in label_ids], o["first_ts"], o["last_ts"]]],
+                    headers=["n", *[f"y={label}" for label in label_ids], "first_ts", "last_ts"],
+                    tablefmt="github",
+                )
+            )
         except ImportError:
             print("tabulate is not installed. Run: pip install tabulate")
         except Exception as e:

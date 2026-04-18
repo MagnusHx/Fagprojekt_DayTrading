@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 from sklearn.metrics import confusion_matrix
 
+from kvant.labels import label_semantics_payload, model_labels_to_trade_labels
 from kvant.ml_prepare_data.data_loading import PreparedStore
 from .backtest import BacktestTradeSimulator, compute_paper_trading_metrics
 from .classification_metrics import classification_metrics
@@ -36,6 +37,7 @@ class EvalConfig:
     backtest_width_minutes: int = 0
     backtest_barrier_height: float = 0.0
     labels: tuple[int, ...] = (0, 1, 2)
+    label_semantics: Optional[dict[str, Any]] = None
 
 
 class ExperimentEvaluator:
@@ -90,7 +92,7 @@ class ExperimentEvaluator:
         per_ticker_rows: List[Dict[str, Any]] = []
 
         # split-level scalars
-        cls = classification_metrics(y_true, y_pred)
+        cls = classification_metrics(y_true, y_pred, labels=self.cfg.labels)
         for k, v in cls.items():
             metrics[f"{split}/{k}"] = v
         metrics[f"{split}/prediction_confidence_mean"] = float(np.mean(y_pred_confidence)) if len(y_pred_confidence) else 0.0
@@ -142,8 +144,12 @@ class ExperimentEvaluator:
                 transaction_cost=self.cfg.transaction_cost,
             )
             if self.cfg.compute_paper_trading_metrics:
+                y_true_trade = model_labels_to_trade_labels(
+                    y_true,
+                    self.cfg.label_semantics or label_semantics_payload(drop_time_exit_label=False),
+                )
                 paper_metrics = compute_paper_trading_metrics(
-                    y_true=y_true,
+                    y_true=y_true_trade,
                     y_pred=y_trade,
                     tids=tid,
                     tpos=tpos,

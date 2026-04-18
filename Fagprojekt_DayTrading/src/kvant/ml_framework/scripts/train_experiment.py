@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from kvant.ml_prepare_data.data_loading import PreparedExperiment
-from kvant.ml_framework.models import Conv1DClassifier
+from kvant.ml_framework.models import create_model
 from kvant.ml_framework.train import Trainer, TrainConfig, ExperimentEvaluator, EvalConfig
 from kvant.ml_framework.train.utils import class_weights_from_dataset
 from kvant.ml_framework.logging import WandbLogger
@@ -48,6 +48,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--lr", type=float, default=5e-3)
     p.add_argument("--weight-decay", type=float, default=5e-5)
+    p.add_argument("--model", type=str, choices=("conv1d", "resnet_lstm"), default="conv1d")
+    p.add_argument("--model-dropout", type=float, default=0.3)
+    p.add_argument("--resnet-channels", type=int, default=64)
+    p.add_argument("--resnet-blocks", type=int, default=2)
+    p.add_argument("--resnet-kernel-size", type=int, default=5)
+    p.add_argument("--lstm-hidden-size", type=int, default=64)
+    p.add_argument("--lstm-layers", type=int, default=1)
     p.add_argument("--train-batch-size", type=int, default=256)
     p.add_argument("--eval-batch-size", type=int, default=512)
     p.add_argument("--wandb-project", type=str, default="kvant-stocks")
@@ -107,6 +114,13 @@ def _make_logger(
             "epochs": args.epochs,
             "lr": args.lr,
             "weight_decay": args.weight_decay,
+            "model": args.model,
+            "model_dropout": args.model_dropout,
+            "resnet_channels": args.resnet_channels,
+            "resnet_blocks": args.resnet_blocks,
+            "resnet_kernel_size": args.resnet_kernel_size,
+            "lstm_hidden_size": args.lstm_hidden_size,
+            "lstm_layers": args.lstm_layers,
             "L": None,
             "train_batch_size": args.train_batch_size,
             "eval_batch_size": args.eval_batch_size,
@@ -156,10 +170,20 @@ def run_single_fold(
         print("-" * 10, "\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = Conv1DClassifier(n_features=exp.store.n_features, n_classes=3).to(device)
+    model = create_model(
+        model_name=args.model,
+        n_features=exp.store.n_features,
+        n_classes=exp.n_classes,
+        conv_channels=args.resnet_channels,
+        num_blocks=args.resnet_blocks,
+        kernel_size=args.resnet_kernel_size,
+        lstm_hidden_size=args.lstm_hidden_size,
+        lstm_layers=args.lstm_layers,
+        dropout=args.model_dropout,
+    ).to(device)
     labeler_cfg = exp.cfg.get("labeler", {})
 
-    w = class_weights_from_dataset(ds_train, n_classes=3)
+    w = class_weights_from_dataset(ds_train, n_classes=exp.n_classes)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(w, device=device))
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -173,10 +197,19 @@ def run_single_fold(
                 "epochs": args.epochs,
                 "lr": args.lr,
                 "weight_decay": args.weight_decay,
+                "model": args.model,
+                "model_dropout": args.model_dropout,
+                "resnet_channels": args.resnet_channels,
+                "resnet_blocks": args.resnet_blocks,
+                "resnet_kernel_size": args.resnet_kernel_size,
+                "lstm_hidden_size": args.lstm_hidden_size,
+                "lstm_layers": args.lstm_layers,
                 "L": exp.L,
                 "train_batch_size": args.train_batch_size,
                 "eval_batch_size": args.eval_batch_size,
                 "class_weights": w.tolist(),
+                "n_classes": exp.n_classes,
+                "label_semantics": exp.label_semantics,
                 "initial_portfolio": args.initial_portfolio,
                 "transaction_cost": args.transaction_cost,
                 "risk_free_rate": args.risk_free_rate,
@@ -212,6 +245,8 @@ def run_single_fold(
             trade_direction_threshold=args.trade_direction_threshold,
             backtest_width_minutes=int(labeler_cfg.get("width_minutes", 0)),
             backtest_barrier_height=float(labeler_cfg.get("height", 0.0)),
+            labels=exp.label_ids,
+            label_semantics=exp.label_semantics,
         ),
     )
 

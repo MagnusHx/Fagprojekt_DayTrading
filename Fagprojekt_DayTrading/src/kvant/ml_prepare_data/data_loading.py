@@ -9,7 +9,12 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from kvant.labels import validate_label_semantics
+from kvant.labels import (
+    class_names_from_semantics,
+    label_ids_from_semantics,
+    label_meanings_from_semantics,
+    validate_label_semantics,
+)
 
 
 def _load_jsonl(path: Path) -> List[Optional[dict]]:
@@ -34,6 +39,11 @@ class PreparedStore:
     def __init__(self, exp_dir: Path):
         self.exp_dir = exp_dir
         self.cfg = json.loads((exp_dir / "config.json").read_text())
+        self.label_semantics = validate_label_semantics(self.cfg, exp_dir=exp_dir)
+        self.label_ids = label_ids_from_semantics(self.label_semantics)
+        self.label_meanings = label_meanings_from_semantics(self.label_semantics)
+        self.class_names = class_names_from_semantics(self.label_semantics)
+        self.n_classes = len(self.label_ids)
         self.tickers_all = json.loads((exp_dir / "tickers_all.json").read_text())
         self.ticker_to_id = {t: i for i, t in enumerate(self.tickers_all)}
 
@@ -179,7 +189,11 @@ class PreparedExperiment:
     def __init__(self, exp_dir: Path):
         self.exp_dir = exp_dir
         self.cfg = json.loads((exp_dir / "config.json").read_text())
-        validate_label_semantics(self.cfg, exp_dir=exp_dir)
+        self.label_semantics = validate_label_semantics(self.cfg, exp_dir=exp_dir)
+        self.label_ids = label_ids_from_semantics(self.label_semantics)
+        self.label_meanings = label_meanings_from_semantics(self.label_semantics)
+        self.class_names = class_names_from_semantics(self.label_semantics)
+        self.n_classes = len(self.label_ids)
         self.L = int(self.cfg["lookback_L"])
 
         self.store = PreparedStore(exp_dir)

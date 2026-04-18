@@ -179,3 +179,40 @@ def test_apply_trade_decision_thresholds_abstains_when_action_or_direction_is_we
     )
 
     np.testing.assert_array_equal(out, np.asarray([2, 0, 1, 1, 1], dtype=np.int64))
+
+
+def test_binary_trade_decision_components_use_probability_band_only() -> None:
+    """Binary directional probabilities should map directly to q_up with always-actionable mass."""
+    y_pred_proba = np.asarray(
+        [
+            [0.25, 0.75],
+            [0.70, 0.30],
+            [0.50, 0.50],
+        ],
+        dtype=np.float64,
+    )
+
+    p_act, q_up = trade_decision_components(y_pred_proba=y_pred_proba)
+
+    np.testing.assert_allclose(p_act, np.asarray([1.0, 1.0, 1.0], dtype=np.float64))
+    np.testing.assert_allclose(q_up, np.asarray([0.75, 0.30, 0.50], dtype=np.float64))
+
+
+def test_binary_apply_trade_decision_thresholds_uses_symmetric_abstention_band() -> None:
+    """Binary directional runs should long, short, or abstain from q_up directly."""
+    y_pred_proba = np.asarray(
+        [
+            [0.25, 0.75],  # long
+            [0.80, 0.20],  # short
+            [0.45, 0.55],  # abstain
+        ],
+        dtype=np.float64,
+    )
+
+    out = apply_trade_decision_thresholds(
+        y_pred_proba=y_pred_proba,
+        trade_action_threshold=0.60,
+        trade_direction_threshold=0.60,
+    )
+
+    np.testing.assert_array_equal(out, np.asarray([2, 0, 1], dtype=np.int64))
