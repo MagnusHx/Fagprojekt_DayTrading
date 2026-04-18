@@ -23,3 +23,37 @@ epoch=0008 train_loss=0.9096 val/accuracy=0.7233 best=0.7233 [train/epoch: 9.53 
 epoch=0009 train_loss=0.9085 val/accuracy=0.5823 best=0.7233 [train/epoch: 9.59 train(pct): 0.13 eval(pct): 0.87]
 epoch=0010 train_loss=0.9058 val/accuracy=0.6869 best=0.7233 [train/epoch: 10.02 train(pct): 0.13 eval(pct): 0.87]
 epoch=0011 train_loss=0.9049 val/accuracy=0.6872 best=0.7233 [train/epoch: 10.28 train(pct): 0.13 eval(pct): 0.87]
+epoch=0012 train_loss=0.9029 val/accuracy=0.6996 best=0.7233 [train/epoch: 10.43 train(pct): 0.13 eval(pct): 0.87]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/scripts/train_experiment.py", line 282, in <module>
+    main()
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/scripts/train_experiment.py", line 254, in main
+    best_metric = run_single_fold(args, exp_dir=exp_dir, fold_tag=fold_tag, logger=fold_logger)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/scripts/train_experiment.py", line 205, in run_single_fold
+    out = trainer.fit(
+          ^^^^^^^^^^^^
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/train/trainer.py", line 151, in fit
+    metrics.update(self.evaluator.evaluate_all(self.model, loaders, step=ep))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/train/evaluator.py", line 186, in evaluate_all
+    m, rows, cm, profit_curve = self.evaluate_split(split, model, loader, step=step)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/train/evaluator.py", line 125, in evaluate_split
+    paper_metrics = compute_paper_trading_metrics(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/train/backtest.py", line 235, in compute_paper_trading_metrics
+    executed = simulator.simulate(y_pred=y_pred, tids=tids, tpos=tpos, y_true=y_true)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/train/backtest.py", line 187, in simulate
+    trade = self._candidate_trade(
+            ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/train/backtest.py", line 112, in _candidate_trade
+    end_target = entry_time + pd.Timedelta(minutes=int(self.width_minutes))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pandas/_libs/tslibs/timedeltas.pyx", line 2261, in pandas._libs.tslibs.timedeltas.Timedelta.__new__
+  File "pandas/_libs/tslibs/timedeltas.pyx", line 1968, in pandas._libs.tslibs.timedeltas._Timedelta._from_value_and_reso
+  File "pandas/_libs/tslibs/timedeltas.pyx", line 1058, in pandas._libs.tslibs.timedeltas._timedelta_from_value_and_reso
+KeyboardInterrupt

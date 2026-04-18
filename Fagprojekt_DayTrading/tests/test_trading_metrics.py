@@ -3,9 +3,10 @@ import pytest
 
 from kvant.ml_framework.train.metrics import (
     BacktestTradeSimulator,
-    apply_trade_confidence_threshold,
+    apply_trade_decision_thresholds,
     compute_paper_trading_metrics,
     simulate_position_aware_trades,
+    trade_decision_components,
 )
 
 
@@ -141,15 +142,40 @@ def test_position_aware_backtest_allows_overlaps_across_tickers() -> None:
     assert executed[1].gross_return == pytest.approx(0.05)
 
 
-def test_apply_trade_confidence_threshold_abstains_on_low_confidence_trade_signals() -> None:
-    """Low-confidence acted predictions should be converted into exit/hold signals."""
-    y_pred = np.asarray([2, 0, 1, 2], dtype=np.int64)
-    y_pred_confidence = np.asarray([0.95, 0.59, 0.20, 0.60], dtype=np.float64)
-
-    out = apply_trade_confidence_threshold(
-        y_pred=y_pred,
-        y_pred_confidence=y_pred_confidence,
-        trade_confidence_threshold=0.60,
+def test_trade_decision_components_split_action_and_direction_confidence() -> None:
+    """Action probability and directional confidence should be derived from up/down mass."""
+    y_pred_proba = np.asarray(
+        [
+            [0.20, 0.30, 0.50],
+            [0.45, 0.40, 0.15],
+            [0.00, 1.00, 0.00],
+        ],
+        dtype=np.float64,
     )
 
-    np.testing.assert_array_equal(out, np.asarray([2, 1, 1, 2], dtype=np.int64))
+    p_act, q_up = trade_decision_components(y_pred_proba=y_pred_proba)
+
+    np.testing.assert_allclose(p_act, np.asarray([0.70, 0.60, 0.00], dtype=np.float64))
+    np.testing.assert_allclose(q_up, np.asarray([0.50 / 0.70, 0.15 / 0.60, 0.50], dtype=np.float64))
+
+
+def test_apply_trade_decision_thresholds_abstains_when_action_or_direction_is_weak() -> None:
+    """Trading should require both enough action probability and directional conviction."""
+    y_pred_proba = np.asarray(
+        [
+            [0.10, 0.10, 0.80],  # strong up
+            [0.45, 0.30, 0.25],  # strong down
+            [0.20, 0.50, 0.30],  # not actionable enough
+            [0.35, 0.15, 0.50],  # actionable but direction too ambiguous
+            [0.05, 0.80, 0.15],  # clearly exit
+        ],
+        dtype=np.float64,
+    )
+
+    out = apply_trade_decision_thresholds(
+        y_pred_proba=y_pred_proba,
+        trade_action_threshold=0.60,
+        trade_direction_threshold=0.60,
+    )
+
+    np.testing.assert_array_equal(out, np.asarray([2, 0, 1, 1, 1], dtype=np.int64))

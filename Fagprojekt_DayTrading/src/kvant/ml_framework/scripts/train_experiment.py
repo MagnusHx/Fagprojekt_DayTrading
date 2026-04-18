@@ -58,9 +58,34 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--transaction-cost", type=float, default=0.001)
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
-    p.add_argument("--trade-confidence-threshold", type=float, default=0.5)
+    p.add_argument(
+        "--trade-confidence-threshold",
+        type=float,
+        default=0.5,
+        help="Legacy alias for --trade-action-threshold; kept for backwards compatibility.",
+    )
+    p.add_argument(
+        "--trade-action-threshold",
+        type=float,
+        default=None,
+        help="Minimum p(up)+p(down) required before the model is allowed to trade.",
+    )
+    p.add_argument(
+        "--trade-direction-threshold",
+        type=float,
+        default=0.6,
+        help="Directional confidence threshold on q_up = p(up)/(p(up)+p(down)); "
+        "shorts use the symmetric lower band 1-threshold.",
+    )
     p.add_argument("--topk-ticker-plots", type=int, default=50)
-    return p.parse_args()
+    args = p.parse_args()
+    args.trade_action_threshold = (
+        args.trade_action_threshold
+        if args.trade_action_threshold is not None
+        else args.trade_confidence_threshold
+    )
+    args.trade_confidence_threshold = args.trade_action_threshold
+    return args
 
 
 def _make_logger(
@@ -91,6 +116,8 @@ def _make_logger(
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
             "trade_confidence_threshold": args.trade_confidence_threshold,
+            "trade_action_threshold": args.trade_action_threshold,
+            "trade_direction_threshold": args.trade_direction_threshold,
             "backtest_width_minutes": None,
             "backtest_barrier_height": None,
         },
@@ -155,6 +182,8 @@ def run_single_fold(
                 "risk_free_rate": args.risk_free_rate,
                 "days_per_year": args.days_per_year,
                 "trade_confidence_threshold": args.trade_confidence_threshold,
+                "trade_action_threshold": args.trade_action_threshold,
+                "trade_direction_threshold": args.trade_direction_threshold,
                 "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0)),
                 "backtest_barrier_height": float(labeler_cfg.get("height", 0.0)),
             }
@@ -179,6 +208,8 @@ def run_single_fold(
             risk_free_rate=args.risk_free_rate,
             days_per_year=args.days_per_year,
             trade_confidence_threshold=args.trade_confidence_threshold,
+            trade_action_threshold=args.trade_action_threshold,
+            trade_direction_threshold=args.trade_direction_threshold,
             backtest_width_minutes=int(labeler_cfg.get("width_minutes", 0)),
             backtest_barrier_height=float(labeler_cfg.get("height", 0.0)),
         ),

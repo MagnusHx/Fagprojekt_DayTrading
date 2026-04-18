@@ -67,13 +67,52 @@ def _candidate_trade(
     )
 
 
+def trade_decision_components(
+    *,
+    y_pred_proba: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return action probability and directional confidence from class probabilities."""
+    y_pred_proba = np.asarray(y_pred_proba, dtype=np.float64)
+    if y_pred_proba.ndim != 2 or y_pred_proba.shape[1] < 3:
+        raise ValueError("y_pred_proba must have shape (n_samples, 3)")
+
+    p_down = y_pred_proba[:, LABEL_DOWN]
+    p_up = y_pred_proba[:, LABEL_UP]
+    p_act = p_down + p_up
+    denom = np.clip(p_act, 1e-12, None)
+    q_up = p_up / denom
+    q_up = np.where(p_act > 0.0, q_up, 0.5)
+    return p_act, q_up
+
+
+def apply_trade_decision_thresholds(
+    *,
+    y_pred_proba: np.ndarray,
+    trade_action_threshold: float,
+    trade_direction_threshold: float,
+) -> np.ndarray:
+    """Map class probabilities to down/exit/up using action and directional thresholds."""
+    if not (0.0 <= float(trade_action_threshold) <= 1.0):
+        raise ValueError("trade_action_threshold must be between 0 and 1")
+    if not (0.5 <= float(trade_direction_threshold) <= 1.0):
+        raise ValueError("trade_direction_threshold must be between 0.5 and 1.0")
+
+    p_act, q_up = trade_decision_components(y_pred_proba=y_pred_proba)
+    out = np.full(len(p_act), LABEL_EXIT, dtype=np.int64)
+
+    actionable = p_act >= float(trade_action_threshold)
+    out[actionable & (q_up >= float(trade_direction_threshold))] = LABEL_UP
+    out[actionable & (q_up <= 1.0 - float(trade_direction_threshold))] = LABEL_DOWN
+    return out
+
+
 def apply_trade_confidence_threshold(
     *,
     y_pred: np.ndarray,
     y_pred_confidence: np.ndarray,
     trade_confidence_threshold: float,
 ) -> np.ndarray:
-    """Convert low-confidence acted predictions into hold/exit signals."""
+    """Legacy argmax-confidence gating kept for backwards compatibility."""
     assert len(y_pred) == len(y_pred_confidence)
 
     y_pred = np.asarray(y_pred, dtype=np.int64)

@@ -13,9 +13,10 @@ from .backtest import BacktestTradeSimulator, compute_paper_trading_metrics
 from .classification_metrics import classification_metrics
 from .predict import predict
 from .trading_metrics import (
-    apply_trade_confidence_threshold,
+    apply_trade_decision_thresholds,
     compute_action_profit_stats,
     compute_profit_curve_over_trades,
+    trade_decision_components,
 )
 
 
@@ -29,7 +30,9 @@ class EvalConfig:
     transaction_cost: float = 0.001
     risk_free_rate: float = 0.0314
     days_per_year: float = 365.0
-    trade_confidence_threshold: float = 0.0
+    trade_confidence_threshold: float = 0.5  # legacy alias for dashboard/config compatibility
+    trade_action_threshold: float = 0.5
+    trade_direction_threshold: float = 0.6
     backtest_width_minutes: int = 0
     backtest_barrier_height: float = 0.0
     labels: tuple[int, ...] = (0, 1, 2)
@@ -72,13 +75,16 @@ class ExperimentEvaluator:
         y_true = pred_out["y_true"]
         y_pred = pred_out["y_pred"]
         y_pred_confidence = pred_out["y_pred_confidence"].astype(np.float64, copy=False)
+        y_pred_proba = pred_out["y_pred_proba"].astype(np.float64, copy=False)
         tid = pred_out["tid"].astype(np.int64, copy=False)
         tpos = pred_out["tpos"].astype(np.int64, copy=False)
-        y_trade = apply_trade_confidence_threshold(
-            y_pred=y_pred,
-            y_pred_confidence=y_pred_confidence,
-            trade_confidence_threshold=self.cfg.trade_confidence_threshold,
+        y_trade = apply_trade_decision_thresholds(
+            y_pred_proba=y_pred_proba,
+            trade_action_threshold=self.cfg.trade_action_threshold,
+            trade_direction_threshold=self.cfg.trade_direction_threshold,
         )
+        trade_action_probability, q_up = trade_decision_components(y_pred_proba=y_pred_proba)
+        trade_directional_confidence = np.maximum(q_up, 1.0 - q_up)
 
         metrics: Dict[str, Any] = {}
         per_ticker_rows: List[Dict[str, Any]] = []
@@ -92,7 +98,21 @@ class ExperimentEvaluator:
             float(np.median(y_pred_confidence)) if len(y_pred_confidence) else 0.0
         )
         trade_signal_mask = np.isin(y_trade, (0, 2))
-        metrics[f"{split}/trade_confidence_threshold"] = float(self.cfg.trade_confidence_threshold)
+        metrics[f"{split}/trade_confidence_threshold"] = float(self.cfg.trade_action_threshold)
+        metrics[f"{split}/trade_action_threshold"] = float(self.cfg.trade_action_threshold)
+        metrics[f"{split}/trade_direction_threshold"] = float(self.cfg.trade_direction_threshold)
+        metrics[f"{split}/trade_action_probability_mean"] = (
+            float(np.mean(trade_action_probability)) if len(trade_action_probability) else 0.0
+        )
+        metrics[f"{split}/trade_action_probability_median"] = (
+            float(np.median(trade_action_probability)) if len(trade_action_probability) else 0.0
+        )
+        metrics[f"{split}/trade_directional_confidence_mean"] = (
+            float(np.mean(trade_directional_confidence)) if len(trade_directional_confidence) else 0.0
+        )
+        metrics[f"{split}/trade_directional_confidence_median"] = (
+            float(np.median(trade_directional_confidence)) if len(trade_directional_confidence) else 0.0
+        )
         metrics[f"{split}/trade_signal_count"] = int(np.sum(trade_signal_mask))
         metrics[f"{split}/trade_signal_rate"] = float(np.mean(trade_signal_mask)) if len(y_trade) else 0.0
         metrics[f"{split}/high_confidence_trade_signal_count"] = int(np.sum(trade_signal_mask))

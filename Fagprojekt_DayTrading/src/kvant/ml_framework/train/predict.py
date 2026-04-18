@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 @torch.no_grad()
 def predict(model: torch.nn.Module, loader: DataLoader, device: torch.device) -> Dict[str, Any]:
     model.eval()
-    yt, yp, y_conf, tids, tposs = [], [], [], [], []
+    yt, yp, y_conf, y_probs, tids, tposs = [], [], [], [], [], []
 
     for batch in loader:
         x, y, tid, tpos = batch
@@ -25,6 +25,7 @@ def predict(model: torch.nn.Module, loader: DataLoader, device: torch.device) ->
         yt.append(y.detach().cpu().numpy())
         yp.append(pred)
         y_conf.append(conf)
+        y_probs.append(probs.detach().cpu().numpy())
 
         tids.append(tid.detach().cpu().numpy())
         tposs.append(tpos.detach().cpu().numpy())
@@ -33,6 +34,7 @@ def predict(model: torch.nn.Module, loader: DataLoader, device: torch.device) ->
         "y_true": np.concatenate(yt) if yt else np.asarray([], dtype=np.int64),
         "y_pred": np.concatenate(yp) if yp else np.asarray([], dtype=np.int64),
         "y_pred_confidence": np.concatenate(y_conf) if y_conf else np.asarray([], dtype=np.float32),
+        "y_pred_proba": np.concatenate(y_probs) if y_probs else np.asarray([], dtype=np.float32).reshape(0, 3),
     }
     out["tid"] = np.concatenate(tids).astype(np.int64, copy=False)
     out["tpos"] = np.concatenate(tposs).astype(np.int64, copy=False)
