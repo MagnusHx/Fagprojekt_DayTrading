@@ -412,8 +412,8 @@ def report_sampling_timeline(
         sampled_ts = sampled_ts_full[:n_sampled]
         sampled_close = sampled_close_full[:n_sampled]
 
-        val_start = pd.Timestamp(row["val_start"]) if row.get("val_start") is not None else None
-        test_start = pd.Timestamp(row["test_start"]) if row.get("test_start") is not None else None
+        val_start = pd.to_datetime(row["val_start"], utc=True) if row.get("val_start") is not None else None
+        test_start = pd.to_datetime(row["test_start"], utc=True) if row.get("test_start") is not None else None
 
         split_labels = []
         for ts in sampled_ts:
