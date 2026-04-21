@@ -179,3 +179,4 @@ cython_debug/
 #.idea/
 
 uv.lock
+Fagprojekt_DayTrading/artifacts/checkpoints
