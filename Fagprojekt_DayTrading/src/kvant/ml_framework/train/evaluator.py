@@ -8,7 +8,13 @@ import torch
 from torch.utils.data import DataLoader
 from sklearn.metrics import confusion_matrix
 
-from kvant.labels import label_semantics_payload, model_labels_to_trade_labels
+from kvant.labels import (
+    ACTED_LABELS,
+    LABEL_EXIT,
+    is_directional_binary_semantics,
+    label_semantics_payload,
+    model_labels_to_trade_labels,
+)
 from kvant.ml_prepare_data.data_loading import PreparedStore
 from .backtest import BacktestTradeSimulator, compute_paper_trading_metrics
 from .classification_metrics import classification_metrics
@@ -80,6 +86,9 @@ class ExperimentEvaluator:
         y_pred_proba = pred_out["y_pred_proba"].astype(np.float64, copy=False)
         tid = pred_out["tid"].astype(np.int64, copy=False)
         tpos = pred_out["tpos"].astype(np.int64, copy=False)
+        label_semantics = self.cfg.label_semantics or label_semantics_payload(drop_time_exit_label=False)
+        y_true_trade = model_labels_to_trade_labels(y_true, label_semantics)
+        is_binary_directional = is_directional_binary_semantics(label_semantics)
         y_trade = apply_trade_decision_thresholds(
             y_pred_proba=y_pred_proba,
             trade_action_threshold=self.cfg.trade_action_threshold,
@@ -87,6 +96,10 @@ class ExperimentEvaluator:
         )
         trade_action_probability, q_up = trade_decision_components(y_pred_proba=y_pred_proba)
         trade_directional_confidence = np.maximum(q_up, 1.0 - q_up)
+        acted_mask = np.isin(y_trade, ACTED_LABELS)
+        actionable_truth_mask = np.isin(y_true_trade, ACTED_LABELS)
+        directional_acted_mask = acted_mask & actionable_truth_mask
+        abstained_mask = y_trade == LABEL_EXIT
 
         metrics: Dict[str, Any] = {}
         per_ticker_rows: List[Dict[str, Any]] = []
@@ -95,29 +108,54 @@ class ExperimentEvaluator:
         cls = classification_metrics(y_true, y_pred, labels=self.cfg.labels)
         for k, v in cls.items():
             metrics[f"{split}/{k}"] = v
+            metrics[f"{split}/cls/{k}"] = v
         metrics[f"{split}/prediction_confidence_mean"] = float(np.mean(y_pred_confidence)) if len(y_pred_confidence) else 0.0
         metrics[f"{split}/prediction_confidence_median"] = (
             float(np.median(y_pred_confidence)) if len(y_pred_confidence) else 0.0
         )
         trade_signal_mask = np.isin(y_trade, (0, 2))
-        metrics[f"{split}/trade_confidence_threshold"] = float(self.cfg.trade_action_threshold)
-        metrics[f"{split}/trade_action_threshold"] = float(self.cfg.trade_action_threshold)
-        metrics[f"{split}/trade_direction_threshold"] = float(self.cfg.trade_direction_threshold)
-        metrics[f"{split}/trade_action_probability_mean"] = (
-            float(np.mean(trade_action_probability)) if len(trade_action_probability) else 0.0
-        )
-        metrics[f"{split}/trade_action_probability_median"] = (
-            float(np.median(trade_action_probability)) if len(trade_action_probability) else 0.0
-        )
-        metrics[f"{split}/trade_directional_confidence_mean"] = (
-            float(np.mean(trade_directional_confidence)) if len(trade_directional_confidence) else 0.0
-        )
-        metrics[f"{split}/trade_directional_confidence_median"] = (
-            float(np.median(trade_directional_confidence)) if len(trade_directional_confidence) else 0.0
-        )
-        metrics[f"{split}/trade_signal_count"] = int(np.sum(trade_signal_mask))
-        metrics[f"{split}/trade_signal_rate"] = float(np.mean(trade_signal_mask)) if len(y_trade) else 0.0
-        metrics[f"{split}/high_confidence_trade_signal_count"] = int(np.sum(trade_signal_mask))
+        decision_metrics = {
+            "trade_confidence_threshold": float(self.cfg.trade_action_threshold),
+            "trade_action_threshold": float(self.cfg.trade_action_threshold),
+            "trade_direction_threshold": float(self.cfg.trade_direction_threshold),
+            "trade_action_probability_mean": float(np.mean(trade_action_probability)) if len(trade_action_probability) else 0.0,
+            "trade_action_probability_median": float(np.median(trade_action_probability)) if len(trade_action_probability) else 0.0,
+            "trade_action_probability_informative": int(not is_binary_directional),
+            "trade_directional_confidence_mean": float(np.mean(trade_directional_confidence))
+            if len(trade_directional_confidence)
+            else 0.0,
+            "trade_directional_confidence_median": float(np.median(trade_directional_confidence))
+            if len(trade_directional_confidence)
+            else 0.0,
+            "trade_signal_count": int(np.sum(trade_signal_mask)),
+            "trade_signal_rate": float(np.mean(trade_signal_mask)) if len(y_trade) else 0.0,
+            "high_confidence_trade_signal_count": int(np.sum(trade_signal_mask)),
+            "actionable_truth_rate_pct": float(np.mean(actionable_truth_mask) * 100.0) if len(y_true_trade) else 0.0,
+            "abstained_prediction_rate_pct": float(np.mean(abstained_mask) * 100.0) if len(y_trade) else 0.0,
+            "acted_prediction_accuracy": float(np.mean(y_true_trade[acted_mask] == y_trade[acted_mask]))
+            if np.any(acted_mask)
+            else 0.0,
+            "directional_acted_accuracy": float(
+                np.mean(y_true_trade[directional_acted_mask] == y_trade[directional_acted_mask])
+            )
+            if np.any(directional_acted_mask)
+            else 0.0,
+            "abstain_on_actionable_truth_pct": float(np.mean(abstained_mask[actionable_truth_mask]) * 100.0)
+            if np.any(actionable_truth_mask)
+            else 0.0,
+            "acted_on_exit_truth_pct": float(np.mean(acted_mask[y_true_trade == LABEL_EXIT]) * 100.0)
+            if np.any(y_true_trade == LABEL_EXIT)
+            else 0.0,
+        }
+        for key, value in decision_metrics.items():
+            metrics[f"{split}/{key}"] = value
+            metrics[f"{split}/decision/{key}"] = value
+
+        execution_metrics = {
+            "n_trade_signals_raw": int(np.sum(acted_mask)),
+        }
+        for key, value in execution_metrics.items():
+            metrics[f"{split}/execution/{key}"] = value
 
         # confusion counts for heatmap
         cm = confusion_matrix(y_true, y_pred, labels=list(self.cfg.labels)).astype(np.int64, copy=False)
@@ -144,10 +182,6 @@ class ExperimentEvaluator:
                 transaction_cost=self.cfg.transaction_cost,
             )
             if self.cfg.compute_paper_trading_metrics:
-                y_true_trade = model_labels_to_trade_labels(
-                    y_true,
-                    self.cfg.label_semantics or label_semantics_payload(drop_time_exit_label=False),
-                )
                 paper_metrics = compute_paper_trading_metrics(
                     y_true=y_true_trade,
                     y_pred=y_trade,
@@ -160,6 +194,24 @@ class ExperimentEvaluator:
                 )
                 for k, v in paper_metrics.items():
                     metrics[f"{split}/{k}"] = v
+                    suffix = str(k).split("/", 1)[1] if "/" in str(k) else str(k)
+                    if suffix in {
+                        "acted_prediction_accuracy",
+                        "directional_acted_accuracy",
+                        "actionable_truth_rate_pct",
+                        "abstained_prediction_rate_pct",
+                        "abstain_on_actionable_truth_pct",
+                        "acted_on_exit_truth_pct",
+                    }:
+                        metrics[f"{split}/decision/{suffix}"] = v
+                    if suffix in {
+                        "n_trade_signals_raw",
+                        "n_trade_signals_skipped_overlap",
+                        "n_executed_trades",
+                        "share_time_active_pct",
+                        "executed_trade_hit_rate_pct",
+                    }:
+                        metrics[f"{split}/execution/{suffix}"] = v
 
         # per-ticker accuracy (+ profit stats columns)
         if self.cfg.compute_per_ticker_accuracy:

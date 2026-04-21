@@ -72,6 +72,18 @@ def test_compute_paper_trading_metrics() -> None:
     assert out["paper/fp"] == 0
     assert out["paper/fn"] == 0
     assert out["paper/accuracy_all_predictions"] == pytest.approx(1.0)
+    assert out["paper/acted_prediction_accuracy"] == pytest.approx(1.0)
+    assert out["paper/directional_acted_accuracy"] == pytest.approx(1.0)
+    assert out["paper/abstained_prediction_rate_pct"] == pytest.approx(25.0)
+    assert out["paper/n_trade_signals_raw"] == 3
+    assert out["paper/n_trade_signals_skipped_overlap"] == 0
+    assert out["paper/executed_trade_hit_rate_pct"] == pytest.approx(100.0)
+    assert out["paper/executed_trade_gross_return_avg_pct"] == pytest.approx((5.0 - 5.0 + 5.0) / 3.0)
+    assert out["paper/executed_trade_net_return_avg_pct"] == pytest.approx((5.0 - 5.0 + 5.0) / 3.0)
+    assert out["paper/long_n_executed_trades"] == 2
+    assert out["paper/short_n_executed_trades"] == 1
+    assert out["paper/long_hit_rate_pct"] == pytest.approx(100.0)
+    assert out["paper/short_hit_rate_pct"] == pytest.approx(100.0)
 
     expected_final_portfolio = 1.05 * 0.95 * 1.05
     expected_annual_net_profit_loss_pct = (expected_final_portfolio - 1.0) * 100.0
@@ -216,3 +228,180 @@ def test_binary_apply_trade_decision_thresholds_uses_symmetric_abstention_band()
     )
 
     np.testing.assert_array_equal(out, np.asarray([2, 0, 1], dtype=np.int64))
+
+
+def test_compute_paper_trading_metrics_exposes_abstention_debug_metrics_for_directional_truth() -> None:
+    """Binary-directional truth with abstentions should produce meaningful debug metrics."""
+    y_true = np.asarray([2, 0, 2], dtype=np.int64)
+    y_pred = np.asarray([1, 0, 2], dtype=np.int64)
+    tids = np.asarray([0, 0, 0], dtype=np.int64)
+    tpos = np.asarray([0, 1, 2], dtype=np.int64)
+    simulator = BacktestTradeSimulator(
+        market_data_store=_FakeMarketDataStore(
+            {
+                0: {
+                    "timestamp": np.asarray(
+                        [
+                            np.datetime64("2024-01-01T00:00:00"),
+                            np.datetime64("2024-01-02T00:00:00"),
+                            np.datetime64("2024-01-03T00:00:00"),
+                        ]
+                    ),
+                    "open": np.asarray([100.0, 100.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([100.0, 100.0, 106.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 94.0, 100.0], dtype=np.float32),
+                    "close": np.asarray([100.0, 95.0, 105.0], dtype=np.float32),
+                    "volume": np.asarray([1.0, 1.0, 1.0], dtype=np.float32),
+                }
+            }
+        ),
+        width_minutes=1439,
+        barrier_height=0.05,
+        transaction_cost=0.001,
+    )
+
+    out = compute_paper_trading_metrics(
+        y_true=y_true,
+        y_pred=y_pred,
+        tids=tids,
+        tpos=tpos,
+        simulator=simulator,
+        initial_portfolio=1.0,
+        risk_free_rate=0.0,
+        days_per_year=3.0,
+    )
+
+    assert out["paper/accuracy_all_predictions"] == pytest.approx(2.0 / 3.0)
+    assert out["paper/acted_prediction_accuracy"] == pytest.approx(1.0)
+    assert out["paper/directional_acted_accuracy"] == pytest.approx(1.0)
+    assert out["paper/actionable_truth_rate_pct"] == pytest.approx(100.0)
+    assert out["paper/abstained_prediction_rate_pct"] == pytest.approx((1.0 / 3.0) * 100.0)
+    assert out["paper/abstain_on_actionable_truth_pct"] == pytest.approx((1.0 / 3.0) * 100.0)
+    assert out["paper/acted_on_exit_truth_pct"] == pytest.approx(0.0)
+    assert out["paper/n_trade_signals_raw"] == 2
+    assert out["paper/n_executed_trades"] == 2
+    assert out["paper/n_trade_signals_skipped_overlap"] == 0
+    assert out["paper/executed_trade_hit_rate_pct"] == pytest.approx(100.0)
+    assert out["paper/executed_trade_gross_return_avg_pct"] == pytest.approx(5.0)
+    assert out["paper/executed_trade_net_return_avg_pct"] == pytest.approx(4.8)
+    assert out["paper/transaction_cost_total_pct"] == pytest.approx(0.4)
+    assert out["paper/long_n_executed_trades"] == 1
+    assert out["paper/short_n_executed_trades"] == 1
+
+
+def test_compute_paper_trading_metrics_handles_zero_executed_trades() -> None:
+    """No acted predictions should produce zeroed execution and economic metrics."""
+    y_true = np.asarray([1, 1], dtype=np.int64)
+    y_pred = np.asarray([1, 1], dtype=np.int64)
+    tids = np.asarray([0, 0], dtype=np.int64)
+    tpos = np.asarray([0, 1], dtype=np.int64)
+    simulator = BacktestTradeSimulator(
+        market_data_store=_FakeMarketDataStore(
+            {
+                0: {
+                    "timestamp": np.asarray([np.datetime64("2024-01-01T00:00:00"), np.datetime64("2024-01-02T00:00:00")]),
+                    "open": np.asarray([100.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([100.0, 100.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 100.0], dtype=np.float32),
+                    "close": np.asarray([100.0, 100.0], dtype=np.float32),
+                    "volume": np.asarray([1.0, 1.0], dtype=np.float32),
+                }
+            }
+        ),
+        width_minutes=1439,
+        barrier_height=0.05,
+        transaction_cost=0.001,
+    )
+
+    out = compute_paper_trading_metrics(
+        y_true=y_true,
+        y_pred=y_pred,
+        tids=tids,
+        tpos=tpos,
+        simulator=simulator,
+    )
+
+    assert out["paper/n_trade_signals_raw"] == 0
+    assert out["paper/n_trade_signals_skipped_overlap"] == 0
+    assert out["paper/n_executed_trades"] == 0
+    assert out["paper/executed_trade_hit_rate_pct"] == pytest.approx(0.0)
+    assert out["paper/executed_trade_gross_return_avg_pct"] == pytest.approx(0.0)
+    assert out["paper/executed_trade_net_return_avg_pct"] == pytest.approx(0.0)
+    assert out["paper/transaction_cost_total_pct"] == pytest.approx(0.0)
+    assert out["paper/share_time_active_pct"] == pytest.approx(0.0)
+
+
+def test_compute_paper_trading_metrics_exposes_cost_drag_when_gross_edge_is_positive() -> None:
+    """Positive gross edge should become negative net edge when transaction costs are large enough."""
+    y_true = np.asarray([2, 2], dtype=np.int64)
+    y_pred = np.asarray([2, 2], dtype=np.int64)
+    tids = np.asarray([0, 0], dtype=np.int64)
+    tpos = np.asarray([0, 1], dtype=np.int64)
+    simulator = BacktestTradeSimulator(
+        market_data_store=_FakeMarketDataStore(
+            {
+                0: {
+                    "timestamp": np.asarray([np.datetime64("2024-01-01T00:00:00"), np.datetime64("2024-01-02T00:00:00")]),
+                    "open": np.asarray([100.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([103.0, 103.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 100.0], dtype=np.float32),
+                    "close": np.asarray([103.0, 103.0], dtype=np.float32),
+                    "volume": np.asarray([1.0, 1.0], dtype=np.float32),
+                }
+            }
+        ),
+        width_minutes=1439,
+        barrier_height=0.03,
+        transaction_cost=0.02,
+    )
+
+    out = compute_paper_trading_metrics(
+        y_true=y_true,
+        y_pred=y_pred,
+        tids=tids,
+        tpos=tpos,
+        simulator=simulator,
+        initial_portfolio=1.0,
+        risk_free_rate=0.0,
+        days_per_year=2.0,
+    )
+
+    assert out["paper/executed_trade_gross_return_avg_pct"] == pytest.approx(3.0)
+    assert out["paper/executed_trade_net_return_avg_pct"] == pytest.approx(-1.0)
+    assert out["paper/transaction_cost_total_pct"] == pytest.approx(8.0)
+
+
+def test_compute_paper_trading_metrics_counts_acted_on_exit_truth() -> None:
+    """Three-class runs should expose when the strategy trades rows whose truth is an exit."""
+    y_true = np.asarray([1, 2], dtype=np.int64)
+    y_pred = np.asarray([2, 2], dtype=np.int64)
+    tids = np.asarray([0, 0], dtype=np.int64)
+    tpos = np.asarray([0, 1], dtype=np.int64)
+    simulator = BacktestTradeSimulator(
+        market_data_store=_FakeMarketDataStore(
+            {
+                0: {
+                    "timestamp": np.asarray([np.datetime64("2024-01-01T00:00:00"), np.datetime64("2024-01-02T00:00:00")]),
+                    "open": np.asarray([100.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([105.0, 105.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 100.0], dtype=np.float32),
+                    "close": np.asarray([105.0, 105.0], dtype=np.float32),
+                    "volume": np.asarray([1.0, 1.0], dtype=np.float32),
+                }
+            }
+        ),
+        width_minutes=1439,
+        barrier_height=0.05,
+        transaction_cost=0.0,
+    )
+
+    out = compute_paper_trading_metrics(
+        y_true=y_true,
+        y_pred=y_pred,
+        tids=tids,
+        tpos=tpos,
+        simulator=simulator,
+    )
+
+    assert out["paper/acted_on_exit_truth_pct"] == pytest.approx(100.0)
+    assert out["paper/abstain_on_actionable_truth_pct"] == pytest.approx(0.0)

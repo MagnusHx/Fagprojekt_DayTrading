@@ -17,6 +17,7 @@ from kvant.labels import (
     label_meanings_from_semantics,
     label_semantics_payload,
 )
+from kvant.ml_framework.train.metric_registry import dashboard_contract_rows, metric_inventory_rows
 
 
 def _safe_int(x: Any, default: int = 0) -> int:
@@ -298,14 +299,20 @@ class WandbLogger:
         namespace: Optional[str] = None,
         step_offset: int = 0,
         manage_run: bool = True,
+        enable_optional_media: bool = False,
+        per_ticker_chart_limit: int = 0,
         **init_kwargs,
     ):
         self.run = run or wandb.init(project=project, name=name, config=config or {}, **init_kwargs)
-        self.api = wandb.Api(timeout=int(api_timeout))
         self.api_timeout = int(api_timeout)
         self.namespace = str(namespace).strip("/") if namespace else ""
         self.step_offset = int(step_offset)
         self.manage_run = bool(manage_run)
+        self.enable_optional_media = bool(enable_optional_media)
+        self.per_ticker_chart_limit = max(0, int(per_ticker_chart_limit))
+        self._wandb_logging_enabled = True
+        self._optional_logging_enabled = bool(enable_optional_media)
+        self._warned_messages: set[str] = set()
 
         # ticker_label -> list of epoch dicts
         self._ticker_history: Dict[str, List[Dict[str, Any]]] = {}
@@ -329,6 +336,8 @@ class WandbLogger:
             namespace=self._qualify_key(namespace),
             step_offset=self.step_offset + int(step_offset),
             manage_run=False,
+            enable_optional_media=self.enable_optional_media,
+            per_ticker_chart_limit=self.per_ticker_chart_limit,
         )
 
     def log_config(self, cfg: Any) -> None:
@@ -357,13 +366,77 @@ class WandbLogger:
             return None
         return self.step_offset + int(step)
 
+    def _is_best_namespace(self) -> bool:
+        if not self.namespace:
+            return False
+        return self.namespace.split("/")[-1] == "best"
+
     def _log_static(self, metrics: Dict[str, Any]) -> None:
-        wandb.log(self._qualify_metrics(metrics), step=self._normalize_step(self._SETUP_STEP))
+        self._wandb_log(metrics, step=self._normalize_step(self._SETUP_STEP), optional=False)
+
+    def _warn_once(self, category: str, message: str) -> None:
+        key = f"{category}:{message}"
+        if key in self._warned_messages:
+            return
+        self._warned_messages.add(key)
+        print(f"[{category}] {message}")
+
+    def _wandb_log(self, metrics: Dict[str, Any], *, step: Optional[int], optional: bool) -> None:
+        if optional and not self._optional_logging_enabled:
+            return
+        if not self._wandb_logging_enabled:
+            return
+        try:
+            wandb.log(self._qualify_metrics(metrics), step=step)
+        except Exception as exc:
+            if optional:
+                self._optional_logging_enabled = False
+                self._warn_once(
+                    "external wandb issue",
+                    f"Disabling optional W&B media logging after error: {exc}",
+                )
+                return
+            self._wandb_logging_enabled = False
+            self._optional_logging_enabled = False
+            self._warn_once(
+                "external wandb issue",
+                f"Disabling further W&B logging after essential logging failed: {exc}",
+            )
 
     def setup(self, *, exp: Any, loaders: Dict[str, Any]) -> None:
         self._class_ids = tuple(getattr(exp.store, "label_ids", self._class_ids))
         self._class_names = list(getattr(exp.store, "class_names", self._class_names))
         self._label_meanings = dict(getattr(exp.store, "label_meanings", self._label_meanings))
+
+        metric_inventory_table = wandb.Table(
+            columns=[
+                "name",
+                "location",
+                "interpretation",
+                "applicability",
+                "layer",
+                "legacy",
+                "primary_debug_metric",
+                "notes",
+            ]
+        )
+        for row in metric_inventory_rows():
+            metric_inventory_table.add_data(
+                row["name"],
+                row["location"],
+                row["interpretation"],
+                row["applicability"],
+                row["layer"],
+                row["legacy"],
+                row["primary_debug_metric"],
+                row["notes"],
+            )
+        self._log_static({"data/metric_inventory": metric_inventory_table})
+
+        dashboard_table = wandb.Table(columns=["section", "metric", "notes"])
+        for row in dashboard_contract_rows():
+            dashboard_table.add_data(row["section"], row["metric"], row["notes"])
+        self._log_static({"data/debug_dashboard_contract": dashboard_table})
 
         # label meanings
         self.run.config.update({"label_meanings": self._label_meanings}, allow_val_change=True)
@@ -380,9 +453,10 @@ class WandbLogger:
         self._log_static({"data/tickers": ticker_table})
 
         # first 10 tickers (or fewer)
-        n_chart = min(10, len(tickers))
+        n_chart = min(self.per_ticker_chart_limit, len(tickers))
         self._tickers_to_chart = [f"{tickers[tid]} (tid={tid})" for tid in range(n_chart)]
-        self.run.config.update({"wandb_chart_first_n_tickers": n_chart}, allow_val_change=True)
+        # Per-ticker epoch charts are intentionally disabled to keep runs lightweight.
+        self.run.config.update({"wandb_chart_first_n_tickers": 0}, allow_val_change=True)
 
         # split distribution table (static)
         # (Assumes ds.summary exists; if you truly want to use ds.display instead, tell me what it returns.)
@@ -450,25 +524,30 @@ class WandbLogger:
             )
         self._log_static({"data/per_ticker_class_balance": balance_table})
 
-        fig = _plot_split_class_balance(split_stats, self._class_ids, self._class_names)
-        self._log_static({"charts/data/class_balance_by_split": wandb.Image(fig)})
-        plt.close(fig)
+        if self.enable_optional_media:
+            fig = _plot_split_class_balance(split_stats, self._class_ids, self._class_names)
+            self._wandb_log({"charts/data/class_balance_by_split": wandb.Image(fig)}, step=self._normalize_step(self._SETUP_STEP), optional=True)
+            plt.close(fig)
 
-        fig = _plot_split_time_ranges(split_stats)
-        self._log_static({"charts/data/split_time_ranges": wandb.Image(fig)})
-        plt.close(fig)
+            fig = _plot_split_time_ranges(split_stats)
+            self._wandb_log({"charts/data/split_time_ranges": wandb.Image(fig)}, step=self._normalize_step(self._SETUP_STEP), optional=True)
+            plt.close(fig)
 
-        fig = _plot_split_expansion(split_stats)
-        self._log_static({"charts/data/split_expansion": wandb.Image(fig)})
-        plt.close(fig)
+            fig = _plot_split_expansion(split_stats)
+            self._wandb_log({"charts/data/split_expansion": wandb.Image(fig)}, step=self._normalize_step(self._SETUP_STEP), optional=True)
+            plt.close(fig)
 
-        fig = _plot_top_ticker_class_balance(
-            [r for r in per_ticker_balance_rows if r["split"] == "train"],
-            self._class_ids,
-            self._class_names,
-        )
-        self._log_static({"charts/data/top_ticker_train_class_balance": wandb.Image(fig)})
-        plt.close(fig)
+            fig = _plot_top_ticker_class_balance(
+                [r for r in per_ticker_balance_rows if r["split"] == "train"],
+                self._class_ids,
+                self._class_names,
+            )
+            self._wandb_log(
+                {"charts/data/top_ticker_train_class_balance": wandb.Image(fig)},
+                step=self._normalize_step(self._SETUP_STEP),
+                optional=True,
+            )
+            plt.close(fig)
 
         density_rows = _load_density_summary(Path(exp.exp_dir))
         if density_rows:
@@ -510,9 +589,14 @@ class WandbLogger:
                 )
             self._log_static({"data/sampling_density": density_table})
 
-            fig = _plot_density_summary(density_rows)
-            self._log_static({"charts/data/sampling_density_summary": wandb.Image(fig)})
-            plt.close(fig)
+            if self.enable_optional_media:
+                fig = _plot_density_summary(density_rows)
+                self._wandb_log(
+                    {"charts/data/sampling_density_summary": wandb.Image(fig)},
+                    step=self._normalize_step(self._SETUP_STEP),
+                    optional=True,
+                )
+                plt.close(fig)
 
     def log(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
         per_ticker_rows = metrics.pop("_per_ticker_rows", None)
@@ -527,7 +611,7 @@ class WandbLogger:
             metrics.setdefault("global_epoch", int(step))
 
         # log scalars
-        wandb.log(self._qualify_metrics(metrics), step=step)
+        self._wandb_log(metrics, step=step, optional=False)
 
         if step is None:
             return
@@ -542,14 +626,15 @@ class WandbLogger:
                     title=f"Confusion matrix ({split})",
                     class_names=self._class_names,
                 )
-                wandb.log({self._qualify_key(f"charts/confusion_matrix/{split}"): wandb.Image(fig)}, step=step)
-                wandb.log(
+                self._wandb_log({f"charts/confusion_matrix/{split}": wandb.Image(fig)}, step=step, optional=False)
+                self._wandb_log(
                     {
-                        self._qualify_key(f"perf/confusion_matrix_normalized/{split}"): _normalized_confusion_table(
+                        f"perf/confusion_matrix_normalized/{split}": _normalized_confusion_table(
                             np.asarray(cm)
                         )
                     },
                     step=step,
+                    optional=False,
                 )
                 plt.close(fig)
 
@@ -566,10 +651,10 @@ class WandbLogger:
                 for trade_number, trade_profit, cum_profit in zip(trade_numbers, trade_profit_pct, cum_profit_pct):
                     table.add_data(int(trade_number), float(trade_profit), float(cum_profit))
 
-                wandb.log({self._qualify_key(f"perf/profit_curve_over_trades/{split}"): table}, step=step)
-                wandb.log(
+                self._wandb_log({f"perf/profit_curve_over_trades/{split}": table}, step=step, optional=False)
+                self._wandb_log(
                     {
-                        self._qualify_key(f"charts/profit_over_trades/{split}"): wandb.plot.line(
+                        f"charts/profit_over_trades/{split}": wandb.plot.line(
                             table,
                             "trade_number",
                             "cum_profit_pct",
@@ -577,6 +662,7 @@ class WandbLogger:
                         )
                     },
                     step=step,
+                    optional=False,
                 )
 
         if not per_ticker_rows:
@@ -646,97 +732,9 @@ class WandbLogger:
                 "short_total": short_total,
             }
 
-        wandb.log({self._qualify_key("perf/per_ticker_table"): table}, step=step)
-
-        # 2) charts for first 10 tickers (train/val/test lines)
-        for ticker_label in self._tickers_to_chart:
-            d = by_ticker.get(ticker_label, {})
-            if not d:
-                continue
-
-            hist = self._ticker_history.setdefault(ticker_label, [])
-            hist.append(
-                {
-                    "epoch": int(local_step or 0),
-                    "acc_train": d.get("train", {}).get("acc", np.nan),
-                    "acc_val": d.get("val", {}).get("acc", np.nan),
-                    "acc_test": d.get("test", {}).get("acc", np.nan),
-                    "buy_avg_train": d.get("train", {}).get("buy_avg", np.nan),
-                    "buy_avg_val": d.get("val", {}).get("buy_avg", np.nan),
-                    "buy_avg_test": d.get("test", {}).get("buy_avg", np.nan),
-                    "short_avg_train": d.get("train", {}).get("short_avg", np.nan),
-                    "short_avg_val": d.get("val", {}).get("short_avg", np.nan),
-                    "short_avg_test": d.get("test", {}).get("short_avg", np.nan),
-                    "buy_total_train": d.get("train", {}).get("buy_total", np.nan),
-                    "buy_total_val": d.get("val", {}).get("buy_total", np.nan),
-                    "buy_total_test": d.get("test", {}).get("buy_total", np.nan),
-                    "short_total_train": d.get("train", {}).get("short_total", np.nan),
-                    "short_total_val": d.get("val", {}).get("short_total", np.nan),
-                    "short_total_test": d.get("test", {}).get("short_total", np.nan),
-                }
-            )
-
-            xs = [h["epoch"] for h in hist]
-
-            def line_series(key_train: str, key_val: str, key_test: str, title: str, chart_key: str):
-                chart = wandb.plot.line_series(
-                    xs=xs,
-                    ys=[
-                        [h[key_train] for h in hist],
-                        [h[key_val] for h in hist],
-                        [h[key_test] for h in hist],
-                    ],
-                    keys=["train", "val", "test"],
-                    title=title,
-                    xname="epoch",
-                    split_table=True,
-                )
-                wandb.log({self._qualify_key(chart_key): chart}, step=step)
-
-            # Accuracy
-            line_series(
-                "acc_train",
-                "acc_val",
-                "acc_test",
-                f"Per-ticker accuracy: {ticker_label}",
-                f"charts/per_ticker/acc/{ticker_label}",
-            )
-
-            # Per-trade profit (buy-only)
-            line_series(
-                "buy_avg_train",
-                "buy_avg_val",
-                "buy_avg_test",
-                f"Buy-only profit (% avg per trade): {ticker_label}",
-                f"charts/per_ticker/buy_profit_avg_per_trade_pct/{ticker_label}",
-            )
-
-            # Per-trade profit (short-only)
-            line_series(
-                "short_avg_train",
-                "short_avg_val",
-                "short_avg_test",
-                f"Short-only profit (% avg per trade): {ticker_label}",
-                f"charts/per_ticker/short_profit_avg_per_trade_pct/{ticker_label}",
-            )
-
-            # Total profit (buy-only)
-            line_series(
-                "buy_total_train",
-                "buy_total_val",
-                "buy_total_test",
-                f"Buy-only profit (% total): {ticker_label}",
-                f"charts/per_ticker/buy_profit_total_pct/{ticker_label}",
-            )
-
-            # Total profit (short-only)
-            line_series(
-                "short_total_train",
-                "short_total_val",
-                "short_total_test",
-                f"Short-only profit (% total): {ticker_label}",
-                f"charts/per_ticker/short_profit_total_pct/{ticker_label}",
-            )
+        if not self._is_best_namespace():
+            return
+        self._wandb_log({"perf/per_ticker_table": table}, step=step, optional=False)
 
     def stop(self) -> None:
         if self.manage_run:

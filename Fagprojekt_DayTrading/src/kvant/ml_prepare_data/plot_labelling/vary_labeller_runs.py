@@ -154,9 +154,10 @@ def run_sweep_and_save_pkl(
     drop_time_exit_label: bool = False,
 ) -> Path:
     if downloaded_splits is None:
-        print("Downloaded splits are none, giving them default.")
-        assert False
-        # downloaded_splits = get_huggingface_top_4_tiny_splits()
+        raise RuntimeError(
+            "run_sweep_and_save_pkl requires downloaded_splits. "
+            "Pass explicit downloaded dataset splits instead of relying on an implicit default."
+        )
 
     dataset_split = downloaded_splits[-1]
     ticker_data_train, ticker_data_val, ticker_data_test = get_ticker_data(dataset_split)

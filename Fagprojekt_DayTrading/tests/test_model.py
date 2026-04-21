@@ -67,3 +67,12 @@ def test_create_model_dispatches_known_model_names() -> None:
 
     assert isinstance(conv, Conv1DClassifier)
     assert isinstance(resnet_lstm, ResNetLSTMClassifier)
+
+
+def test_create_model_passes_dropout_to_conv1d() -> None:
+    """Conv1D should honor the configurable dropout knob."""
+    conv = create_model(model_name="conv1d", n_features=8, n_classes=3, dropout=0.15)
+    dropout_layers = [layer for layer in conv.net if isinstance(layer, torch.nn.Dropout)]
+
+    assert dropout_layers
+    assert all(layer.p == 0.15 for layer in dropout_layers)

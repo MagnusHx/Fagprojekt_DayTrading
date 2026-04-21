@@ -17,7 +17,7 @@ def create_model(
     dropout: float = 0.3,
 ):
     if model_name == "conv1d":
-        return Conv1DClassifier(n_features=n_features, n_classes=n_classes)
+        return Conv1DClassifier(n_features=n_features, n_classes=n_classes, dropout=dropout)
     if model_name == "resnet_lstm":
         return ResNetLSTMClassifier(
             n_features=n_features,

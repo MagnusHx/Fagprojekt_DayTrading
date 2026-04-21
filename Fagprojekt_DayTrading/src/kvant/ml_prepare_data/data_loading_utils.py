@@ -3,6 +3,25 @@ from typing import Any, Dict
 import numpy as np
 
 
+def _print_plain_summary(headers, rows) -> None:
+    if not rows:
+        print("(empty dataset)")
+        return
+
+    widths = [len(str(h)) for h in headers]
+    for row in rows:
+        for idx, cell in enumerate(row):
+            widths[idx] = max(widths[idx], len(str(cell)))
+
+    def fmt(row):
+        return " | ".join(str(cell).ljust(widths[idx]) for idx, cell in enumerate(row))
+
+    print(fmt(headers))
+    print("-+-".join("-" * w for w in widths))
+    for row in rows:
+        print(fmt(row))
+
+
 def summary(self, display: bool = True) -> Dict[str, Any]:
     """
     Summarize this dataset split (as defined by self.index).
@@ -118,7 +137,18 @@ def summary(self, display: bool = True) -> Dict[str, Any]:
                 )
             )
         except ImportError:
-            print("tabulate is not installed. Run: pip install tabulate")
+            headers = ["ticker", "n", *[f"y={label}" for label in label_ids], "first_ts", "last_ts"]
+            rows = []
+            for ticker in sorted(per_ticker.keys()):
+                d = per_ticker[ticker]
+                rows.append([ticker, d["n"], *[d["y_counts"][label] for label in label_ids], d["first_ts"], d["last_ts"]])
+            _print_plain_summary(headers, rows)
+            print("\nOverall:")
+            o = out["overall"]
+            _print_plain_summary(
+                ["n", *[f"y={label}" for label in label_ids], "first_ts", "last_ts"],
+                [[o["n"], *[o["y_counts"][label] for label in label_ids], o["first_ts"], o["last_ts"]]],
+            )
         except Exception as e:
             print("Failed to display summary:", e)
 

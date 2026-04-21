@@ -177,9 +177,17 @@ class BacktestTradeSimulator:
         y_true: Optional[np.ndarray] = None,
     ) -> List[BacktestTrade]:
         """Simulate non-overlapping per-ticker trades on sampled raw bars."""
-        assert len(y_pred) == len(tids) == len(tpos)
+        if not (len(y_pred) == len(tids) == len(tpos)):
+            raise ValueError(
+                "BacktestTradeSimulator.simulate expected y_pred, tids, and tpos to have the same length, "
+                f"got {len(y_pred)}, {len(tids)}, and {len(tpos)}."
+            )
         if y_true is not None:
-            assert len(y_true) == len(y_pred)
+            if len(y_true) != len(y_pred):
+                raise ValueError(
+                    "BacktestTradeSimulator.simulate expected y_true to match y_pred length, "
+                    f"got {len(y_true)} and {len(y_pred)}."
+                )
 
         candidates: List[BacktestTrade] = []
         for idx, signal_label in enumerate(np.asarray(y_pred, dtype=np.int64)):
@@ -219,7 +227,11 @@ def compute_paper_trading_metrics(
     days_per_year: float = 365.0,
 ) -> Dict[str, Any]:
     """Compute paper-trading metrics from simulated executed trades."""
-    assert len(y_true) == len(y_pred) == len(tids) == len(tpos)
+    if not (len(y_true) == len(y_pred) == len(tids) == len(tpos)):
+        raise ValueError(
+            "compute_paper_trading_metrics expected y_true, y_pred, tids, and tpos to have the same length, "
+            f"got {len(y_true)}, {len(y_pred)}, {len(tids)}, and {len(tpos)}."
+        )
 
     y_true = np.asarray(y_true, dtype=np.int64)
     y_pred = np.asarray(y_pred, dtype=np.int64)
@@ -230,14 +242,67 @@ def compute_paper_trading_metrics(
     tn = int(np.sum((y_true == LABEL_DOWN) & (y_pred == LABEL_DOWN)))
     fp = int(np.sum((y_true == LABEL_DOWN) & (y_pred == LABEL_UP)))
     fn = int(np.sum((y_true == LABEL_UP) & (y_pred == LABEL_DOWN)))
+    # Legacy compatibility metric only. On directional-binary runs, abstentions are
+    # encoded as EXIT in y_pred while truth is still directional in canonical trade
+    # space, so this can look artificially poor. Prefer acted/directional_acted metrics.
     accuracy_all_predictions = float(np.mean(y_true == y_pred)) if len(y_true) else 0.0
+    acted_mask = np.isin(y_pred, ACTED_LABELS)
+    actionable_truth_mask = np.isin(y_true, ACTED_LABELS)
+    directional_acted_mask = acted_mask & actionable_truth_mask
+    abstained_mask = y_pred == 1
+
+    acted_prediction_accuracy = (
+        float(np.mean(y_true[acted_mask] == y_pred[acted_mask])) if np.any(acted_mask) else 0.0
+    )
+    directional_acted_accuracy = (
+        float(np.mean(y_true[directional_acted_mask] == y_pred[directional_acted_mask]))
+        if np.any(directional_acted_mask)
+        else 0.0
+    )
+    abstain_on_actionable_truth_pct = (
+        float(np.mean(abstained_mask[actionable_truth_mask]) * 100.0) if np.any(actionable_truth_mask) else 0.0
+    )
+    acted_on_exit_truth_pct = (
+        float(np.mean(acted_mask[y_true == 1]) * 100.0) if np.any(y_true == 1) else 0.0
+    )
 
     executed = simulator.simulate(y_pred=y_pred, tids=tids, tpos=tpos, y_true=y_true)
+    gross_returns = np.asarray([trade.gross_return for trade in executed], dtype=np.float64)
+    net_returns = np.asarray([trade.net_return for trade in executed], dtype=np.float64)
+    executed_trade_hit_flags = np.asarray(
+        [
+            int(trade.true_label) == int(trade.signal_label)
+            for trade in executed
+            if trade.true_label in ACTED_LABELS
+        ],
+        dtype=np.float64,
+    )
+    long_net_returns = np.asarray([trade.net_return for trade in executed if trade.signal_label == LABEL_UP], dtype=np.float64)
+    short_net_returns = np.asarray(
+        [trade.net_return for trade in executed if trade.signal_label == LABEL_DOWN], dtype=np.float64
+    )
+    long_hit_flags = np.asarray(
+        [int(trade.true_label) == LABEL_UP for trade in executed if trade.signal_label == LABEL_UP and trade.true_label in ACTED_LABELS],
+        dtype=np.float64,
+    )
+    short_hit_flags = np.asarray(
+        [int(trade.true_label) == LABEL_DOWN for trade in executed if trade.signal_label == LABEL_DOWN and trade.true_label in ACTED_LABELS],
+        dtype=np.float64,
+    )
+    n_trade_signals_raw = int(np.sum(acted_mask))
+    n_trade_signals_skipped_overlap = int(max(n_trade_signals_raw - len(executed), 0))
+    transaction_cost_total_pct = float(len(executed) * 2.0 * float(simulator.transaction_cost) * 100.0)
 
-    sample_times = [
-        _to_utc_timestamp(simulator.market_data_store.market_data(int(tid))["timestamp"][int(pos)])
-        for tid, pos in zip(tids, tpos)
-    ]
+    sample_times = []
+    for tid, pos in zip(tids, tpos):
+        market_data = simulator.market_data_store.market_data(int(tid))
+        if market_data is None:
+            ticker = simulator.market_data_store.ticker(int(tid))
+            raise RuntimeError(
+                f"Prepared market data is missing for ticker {ticker}. "
+                "Regenerate the prepared experiment so backtests can use raw sampled OHLCV bars."
+            )
+        sample_times.append(_to_utc_timestamp(market_data["timestamp"][int(pos)]))
     if sample_times:
         period_start = min(sample_times).normalize()
         period_end = max(sample_times).normalize()
@@ -307,10 +372,36 @@ def compute_paper_trading_metrics(
         "paper/annual_net_profit_loss_pct": float(annual_net_profit_loss_pct),
         "paper/profitable_transactions_pct": float(profitable_transactions_pct),
         "paper/accuracy_all_predictions": float(accuracy_all_predictions),
+        "paper/acted_prediction_accuracy": float(acted_prediction_accuracy),
+        "paper/directional_acted_accuracy": float(directional_acted_accuracy),
+        "paper/actionable_truth_rate_pct": float(np.mean(actionable_truth_mask) * 100.0) if len(y_true) else 0.0,
+        "paper/abstained_prediction_rate_pct": float(np.mean(abstained_mask) * 100.0) if len(y_pred) else 0.0,
+        "paper/abstain_on_actionable_truth_pct": float(abstain_on_actionable_truth_pct),
+        "paper/acted_on_exit_truth_pct": float(acted_on_exit_truth_pct),
         "paper/sharpe_ratio_annualized": float(sharpe_ratio_annualized),
         "paper/max_drawdown_pct": float(max_drawdown_pct),
         "paper/share_time_active_pct": float(share_time_active_pct),
+        "paper/n_trade_signals_raw": int(n_trade_signals_raw),
+        "paper/n_trade_signals_skipped_overlap": int(n_trade_signals_skipped_overlap),
         "paper/n_executed_trades": int(len(executed)),
+        "paper/executed_trade_hit_rate_pct": float(np.mean(executed_trade_hit_flags) * 100.0)
+        if len(executed_trade_hit_flags)
+        else 0.0,
+        "paper/executed_trade_gross_return_avg_pct": float(np.mean(gross_returns) * 100.0) if len(gross_returns) else 0.0,
+        "paper/executed_trade_net_return_avg_pct": float(np.mean(net_returns) * 100.0) if len(net_returns) else 0.0,
+        "paper/executed_trade_gross_return_median_pct": float(np.median(gross_returns) * 100.0)
+        if len(gross_returns)
+        else 0.0,
+        "paper/executed_trade_net_return_median_pct": float(np.median(net_returns) * 100.0) if len(net_returns) else 0.0,
+        "paper/executed_trade_gross_return_total_pct": float(np.sum(gross_returns) * 100.0) if len(gross_returns) else 0.0,
+        "paper/executed_trade_net_return_total_pct": float(np.sum(net_returns) * 100.0) if len(net_returns) else 0.0,
+        "paper/transaction_cost_total_pct": float(transaction_cost_total_pct),
+        "paper/long_n_executed_trades": int(np.sum([trade.signal_label == LABEL_UP for trade in executed])),
+        "paper/short_n_executed_trades": int(np.sum([trade.signal_label == LABEL_DOWN for trade in executed])),
+        "paper/long_hit_rate_pct": float(np.mean(long_hit_flags) * 100.0) if len(long_hit_flags) else 0.0,
+        "paper/short_hit_rate_pct": float(np.mean(short_hit_flags) * 100.0) if len(short_hit_flags) else 0.0,
+        "paper/long_net_return_avg_pct": float(np.mean(long_net_returns) * 100.0) if len(long_net_returns) else 0.0,
+        "paper/short_net_return_avg_pct": float(np.mean(short_net_returns) * 100.0) if len(short_net_returns) else 0.0,
         "paper/n_test_days": int(n_days),
         "paper/tp": int(tp),
         "paper/tn": int(tn),

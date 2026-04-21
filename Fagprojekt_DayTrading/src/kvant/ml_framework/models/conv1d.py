@@ -5,9 +5,9 @@ import torch.nn as nn
 
 
 class Conv1DClassifier(nn.Module):
-    def __init__(self, n_features: int, n_classes: int = 3):
+    def __init__(self, n_features: int, n_classes: int = 3, *, dropout: float = 0.3):
         super().__init__()
-        dropout_rate = 0.3
+        dropout_rate = float(dropout)
         self.net = nn.Sequential(
             nn.Conv1d(n_features, 32, kernel_size=5, padding=2),
             nn.BatchNorm1d(32),

@@ -1,0 +1,48 @@
+{
+  "exp_dir": "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_droptexit_fold04",
+  "label_regime": "binary",
+  "n_classes": 2,
+  "n_features": 36,
+  "has_market_data": true,
+  "split_summaries": {
+    "train": {
+      "n": 80439,
+      "first_ts": "2021-01-04T14:41:00",
+      "last_ts": "2024-12-31T17:36:00",
+      "y_counts": {
+        "0": 41224,
+        "1": 39215
+      },
+      "ticker_count": 20
+    },
+    "val": {
+      "n": 5600,
+      "first_ts": "2025-01-02T14:40:00",
+      "last_ts": "2025-03-31T16:28:00",
+      "y_counts": {
+        "0": 3136,
+        "1": 2464
+      },
+      "ticker_count": 20
+    },
+    "test": {
+      "n": 8598,
+      "first_ts": "2025-04-01T13:40:00",
+      "last_ts": "2025-06-30T17:35:00",
+      "y_counts": {
+        "0": 4492,
+        "1": 4106
+      },
+      "ticker_count": 20
+    }
+  },
+  "feature_checks": {
+    "total_rows": 672288,
+    "n_features": 36,
+    "nonfinite_feature_values": 0
+  },
+  "dependency_checks": {
+    "tabulate": false,
+    "wandb": true
+  }
+}
