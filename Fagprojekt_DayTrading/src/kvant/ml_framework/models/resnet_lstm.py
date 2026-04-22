@@ -88,9 +88,15 @@ class ResNetLSTMClassifier(nn.Module):
             nn.Linear(lstm_hidden_size, n_classes),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         out = self.stem(x)
         out = self.res_blocks(out)
         out = out.transpose(1, 2).contiguous()  # (batch, seq_len, channels)
         _, (hidden, _) = self.lstm(out)
-        return self.head(hidden[-1])
+        return hidden[-1]
+
+    def forward_logits_from_features(self, features: torch.Tensor) -> torch.Tensor:
+        return self.head(features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.forward_logits_from_features(self.forward_features(x))

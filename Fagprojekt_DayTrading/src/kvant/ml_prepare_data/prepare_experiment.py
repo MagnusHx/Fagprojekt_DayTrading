@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import tqdm
 
-from kvant.labels import label_semantics_payload
+from kvant.labels import label_semantics_payload, pipeline_label_spaces_payload
 from kvant.ml_prepare_data.labelling.tripple_bar import Labeler, TripleBarrierLabeler
 from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
 from kvant.ml_prepare_data.reporting import report_sampling_density, report_sampling_timeline
@@ -101,6 +101,15 @@ def save_ticker_artifacts(
         save_label_metadata_jsonl(tdir, label_metadata)
 
 
+def _config_payload(cfg: ExperimentConfig, fe: FeatureEngineer | None = None) -> dict:
+    payload = asdict(cfg)
+    payload["pipeline_stage"] = "event_outcome"
+    payload["label_spaces"] = pipeline_label_spaces_payload()
+    if fe is not None:
+        payload["feature_engineer"] = asdict(fe)
+    return payload
+
+
 def _as_dt64_utc_naive(x) -> np.datetime64:
     """
     Convert x (pd.Timestamp/np.datetime64/etc.) to UTC-naive np.datetime64[ns].
@@ -186,9 +195,10 @@ def prepare_experiment(
     Key behavior:
       1) Splits are manual and always provided: train/val/test dicts.
       2) For each ticker, concatenate (train + val + test) first.
-      3) Apply sampler + feature engineer + labeler on the concatenated series
-         so val/test can use training history causally (no leakage).
-      4) Then build train/val/test indices using per-ticker boundaries inferred
+      3) Apply feature engineering on the concatenated minute series first, then
+         sample the already-computed features using the sampler timestamps so
+         val/test can use training history causally (no leakage).
+      4) Apply labeling on sampled OHLCV bars, then build train/val/test indices using per-ticker boundaries inferred
          from the first timestamp in val/test.
 
     Additional behavior in this version:
@@ -279,7 +289,7 @@ def prepare_experiment(
     exp_id = cfg.stable_id() if experiment_id is None else experiment_id
     exp_dir = out_root / exp_id
     exp_dir.mkdir(parents=True, exist_ok=True)
-    (exp_dir / "config.json").write_text(json.dumps(asdict(cfg), indent=2, default=str))
+    (exp_dir / "config.json").write_text(json.dumps(_config_payload(cfg), indent=2, default=str))
 
     tickers_train = sorted(ticker_dfs_train.keys())
     tickers_val = sorted(ticker_dfs_val.keys())
@@ -312,8 +322,8 @@ def prepare_experiment(
         # --------------------------------------------------------
         # Fit on TRAIN ONLY
         #   - sampler: explicit per-ticker tuning allowed (no-op in IdentitySampler)
-        #   - feature engineer: fit on *SAMPLED TRAIN* (paper: indicators computed after sampling)
-        #   - labeler: no-op fit (but keep consistent: fit on sampled train too)
+        #   - feature engineer: fit on minute-resolution train data
+        #   - labeler: fit on sampled train bars (currently a no-op)
         # --------------------------------------------------------
 
         # 1) Tune sampler on TRAIN ONLY (per-ticker tuning handled internally).
@@ -328,41 +338,51 @@ def prepare_experiment(
         json.dumps(sampler_per_ticker_meta, indent=2, default=_json_default)
     )
 
-    sampled_train_chunks: dict[str, pd.DataFrame] = {}
+    minute_train_chunks: dict[str, pd.DataFrame] = {}
 
-    # 3) Sample TRAIN ticker-by-ticker once and reuse the sampled chunks for
-    #    feature fitting instead of re-running the sampler over the same data.
-    print(f"[{exp_id}] Sampling train data for feature fitting...")
-    sampled_train_count = 0
+    # 3) Collect full minute-resolution train chunks for feature fitting.
+    print(f"[{exp_id}] Collecting minute train data for feature fitting...")
     df_fit_sampled = None
-    for ticker in tqdm.tqdm(tickers_train, desc="Sampling train chunks", dynamic_ncols=True):
+    for ticker in tqdm.tqdm(tickers_train, desc="Collecting minute train chunks", dynamic_ncols=True):
         dft = ticker_dfs_train.get(ticker)
         if dft is None or len(dft) == 0:
             continue
         dft = ensure_utc_sorted_index(dft)
+        minute_train_chunks[ticker] = dft
+
+    if not minute_train_chunks:
+        raise RuntimeError("No minute-resolution training rows available to fit feature engineer.")
+
+    # 4) Fit FE on minute train data, then fit the labeler on sampled train bars.
+    print(f"[{exp_id}] Fitting feature engineer and labeler...")
+    if hasattr(fe, "fit_many"):
+        fe.fit_many(minute_train_chunks[ticker] for ticker in tickers_train if ticker in minute_train_chunks)
+    else:
+        df_fit_minute = pd.concat(
+            [minute_train_chunks[ticker] for ticker in tickers_train if ticker in minute_train_chunks],
+            axis=0,
+        )
+        fe.fit(df_fit_minute)
+
+    for ticker in tqdm.tqdm(tickers_train, desc="Sampling train chunks", dynamic_ncols=True):
+        dft = minute_train_chunks.get(ticker)
+        if dft is None or len(dft) == 0:
+            continue
         dft_s = sampler.transform(dft, ticker=ticker)
         if dft_s is None or len(dft_s) == 0:
             continue
         dft_s = ensure_utc_sorted_index(dft_s)
-        sampled_train_chunks[ticker] = dft_s
-        sampled_train_count += int(len(dft_s))
         if df_fit_sampled is None:
             df_fit_sampled = dft_s
 
-    if sampled_train_count == 0:
+    if df_fit_sampled is None:
         raise RuntimeError(
-            "No sampled training rows available to fit feature engineer. "
+            "No sampled training rows available to fit labeler. "
             "This usually means your sampler is too sparse or train data is empty."
         )
 
-    # 4) Fit FE + labeler on sampled train
-    print(f"[{exp_id}] Fitting feature engineer and labeler...")
-    if hasattr(fe, "fit_many"):
-        fe.fit_many(sampled_train_chunks[ticker] for ticker in tickers_train if ticker in sampled_train_chunks)
-    else:
-        df_fit_sampled = pd.concat([sampled_train_chunks[ticker] for ticker in tickers_train if ticker in sampled_train_chunks], axis=0)
-        fe.fit(df_fit_sampled)
     labeler.fit(df_fit_sampled)
+    (exp_dir / "config.json").write_text(json.dumps(_config_payload(cfg, fe), indent=2, default=str))
     # --------------------------------------------------------
     # Process each ticker on full history (train+val+test)
     # --------------------------------------------------------
@@ -393,11 +413,25 @@ def prepare_experiment(
         ts_raw = df_full_raw.index.to_numpy()
         raw_counts_by_split = _counts_by_split_for_ts(ts_raw, val_start, test_start)
 
-        # Sampled
+        # Sampled OHLCV bars for labeling/backtesting
         df1 = sampler.transform(df_full_raw, ticker=t)
         df1 = ensure_utc_sorted_index(df1)
 
-        X, feat_names = fe.transform(df1)
+        # Features are computed on the full minute-resolution dataframe first,
+        # then sampled at the timestamps selected by the sampler.
+        X_full, feat_names = fe.transform(df_full_raw)
+        feat_df_full = pd.DataFrame(X_full, index=df_full_raw.index, columns=feat_names)
+        try:
+            feat_df_sampled = feat_df_full.loc[df1.index]
+        except KeyError as exc:
+            missing = sorted(set(df1.index).difference(set(feat_df_full.index)))
+            missing_preview = [str(x) for x in missing[:5]]
+            raise RuntimeError(
+                f"Sampled timestamps for {t} were not found in the minute-resolution feature dataframe. "
+                f"Examples: {missing_preview}"
+            ) from exc
+
+        X = feat_df_sampled.to_numpy(dtype=np.float32, copy=False)
         y, y_meta = labeler.transform(df1)
 
         if len(X) != len(y):
@@ -565,7 +599,7 @@ def prepare_single_dataset(dataset_split: DownloadedDatasetSplit, sampler, featu
         feature_engineer=asdict(feature_engineer),
         labeler=asdict(labeler),
         lookback_L=L,
-        label_semantics=label_semantics_payload(drop_time_exit_label=bool(getattr(labeler, "drop_time_exit_label", False))),
+        label_semantics=label_semantics_payload(drop_time_exit_label=False),
     )
     out_root = Path("../ml_framework/prepared")
     prepared = prepare_experiment(
@@ -621,7 +655,7 @@ def main():
             feature_engineer=asdict(fe),
             labeler=asdict(labeler),
             lookback_L=L,
-            label_semantics=label_semantics_payload(drop_time_exit_label=drop_time_exit_label),
+            label_semantics=label_semantics_payload(drop_time_exit_label=False),
         )
 
         fold_id = f"{label}_fold{fold_idx:02d}"

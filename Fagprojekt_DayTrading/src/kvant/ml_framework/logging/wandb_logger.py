@@ -404,9 +404,22 @@ class WandbLogger:
             )
 
     def setup(self, *, exp: Any, loaders: Dict[str, Any]) -> None:
-        self._class_ids = tuple(getattr(exp.store, "label_ids", self._class_ids))
-        self._class_names = list(getattr(exp.store, "class_names", self._class_names))
-        self._label_meanings = dict(getattr(exp.store, "label_meanings", self._label_meanings))
+        dataset_class_ids = None
+        for loader in loaders.values():
+            dataset = getattr(loader, "dataset", None)
+            if dataset is None or not hasattr(dataset, "label_ids"):
+                continue
+            dataset_class_ids = tuple(getattr(dataset, "label_ids"))
+            break
+
+        if dataset_class_ids == (0, 1):
+            self._class_ids = (0, 1)
+            self._class_names = ["Down barrier hit (y=0)", "Up barrier hit (y=1)"]
+            self._label_meanings = {0: "down barrier hit", 1: "up barrier hit"}
+        else:
+            self._class_ids = tuple(getattr(exp.store, "label_ids", self._class_ids))
+            self._class_names = list(getattr(exp.store, "class_names", self._class_names))
+            self._label_meanings = dict(getattr(exp.store, "label_meanings", self._label_meanings))
 
         metric_inventory_table = wandb.Table(
             columns=[
@@ -601,6 +614,7 @@ class WandbLogger:
     def log(self, metrics: Dict[str, Any], step: Optional[int] = None) -> None:
         per_ticker_rows = metrics.pop("_per_ticker_rows", None)
         confusion_counts = metrics.pop("_confusion_counts", None)
+        confusion_class_names = metrics.pop("_confusion_class_names", None)
         profit_curves = metrics.pop("_profit_curves", None)
         local_step = None if step is None else int(step)
         step = self._normalize_step(step)
@@ -618,13 +632,14 @@ class WandbLogger:
 
         # confusion matrices (graphical heatmaps)
         if isinstance(confusion_counts, dict):
+            class_names = list(confusion_class_names) if confusion_class_names else self._class_names
             for split, cm in confusion_counts.items():
                 if cm is None:
                     continue
                 fig = _plot_confusion_heatmap(
                     np.asarray(cm),
                     title=f"Confusion matrix ({split})",
-                    class_names=self._class_names,
+                    class_names=class_names,
                 )
                 self._wandb_log({f"charts/confusion_matrix/{split}": wandb.Image(fig)}, step=step, optional=False)
                 self._wandb_log(

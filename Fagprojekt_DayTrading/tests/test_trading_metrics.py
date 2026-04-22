@@ -3,6 +3,7 @@ import pytest
 
 from kvant.ml_framework.train.metrics import (
     BacktestTradeSimulator,
+    apply_trade_decision_bands,
     apply_trade_decision_thresholds,
     compute_paper_trading_metrics,
     simulate_position_aware_trades,
@@ -191,6 +192,32 @@ def test_apply_trade_decision_thresholds_abstains_when_action_or_direction_is_we
     )
 
     np.testing.assert_array_equal(out, np.asarray([2, 0, 1, 1, 1], dtype=np.int64))
+
+
+def test_apply_trade_decision_bands_matches_threshold_rule_components() -> None:
+    y_pred_proba = np.asarray(
+        [
+            [0.10, 0.10, 0.80],
+            [0.45, 0.30, 0.25],
+            [0.20, 0.50, 0.30],
+        ],
+        dtype=np.float64,
+    )
+
+    p_act, q_up = trade_decision_components(y_pred_proba=y_pred_proba)
+    direct = apply_trade_decision_bands(
+        p_act=p_act,
+        q_up=q_up,
+        trade_action_threshold=0.60,
+        trade_direction_threshold=0.60,
+    )
+    threshold = apply_trade_decision_thresholds(
+        y_pred_proba=y_pred_proba,
+        trade_action_threshold=0.60,
+        trade_direction_threshold=0.60,
+    )
+
+    np.testing.assert_array_equal(direct, threshold)
 
 
 def test_binary_trade_decision_components_use_probability_band_only() -> None:

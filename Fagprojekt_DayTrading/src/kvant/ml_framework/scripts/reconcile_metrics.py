@@ -96,12 +96,12 @@ def main() -> None:
     model = create_model(
         model_name=str(bundle["model_name"]),
         n_features=exp.store.n_features,
-        n_classes=exp.n_classes,
+        n_classes=2,
         **dict(bundle.get("model_kwargs", {})),
     ).to(device)
     model.load_state_dict(bundle["model_state"])
 
-    dl_train, dl_val, dl_test = exp.get_loaders(
+    dl_train, dl_val, dl_test = exp.get_primary_side_loaders(
         train_batch_size=256,
         eval_batch_size=512,
         num_workers=0,
@@ -116,8 +116,7 @@ def main() -> None:
     )
 
     eval_cfg_payload = dict(bundle["eval_config"])
-    eval_cfg_payload["labels"] = exp.label_ids
-    eval_cfg_payload["label_semantics"] = exp.label_semantics
+    eval_cfg_payload["labels"] = (0, 1)
     evaluator = ExperimentEvaluator(
         store=exp.store,
         device=device,

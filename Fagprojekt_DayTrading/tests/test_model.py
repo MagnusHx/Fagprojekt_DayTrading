@@ -72,7 +72,42 @@ def test_create_model_dispatches_known_model_names() -> None:
 def test_create_model_passes_dropout_to_conv1d() -> None:
     """Conv1D should honor the configurable dropout knob."""
     conv = create_model(model_name="conv1d", n_features=8, n_classes=3, dropout=0.15)
-    dropout_layers = [layer for layer in conv.net if isinstance(layer, torch.nn.Dropout)]
+    dropout_layers = [layer for layer in conv.features if isinstance(layer, torch.nn.Dropout)]
 
     assert dropout_layers
     assert all(layer.p == 0.15 for layer in dropout_layers)
+
+
+def test_conv1d_exposes_forward_feature_api() -> None:
+    model = Conv1DClassifier(n_features=8, n_classes=3, dropout=0.1)
+    model.eval()
+    x = torch.randn(4, 8, 20)
+
+    features = model.forward_features(x)
+    logits = model.forward_logits_from_features(features)
+
+    assert features.shape == (4, 64)
+    assert logits.shape == (4, 3)
+    assert torch.allclose(model(x), logits)
+
+
+def test_resnet_lstm_exposes_forward_feature_api() -> None:
+    model = ResNetLSTMClassifier(
+        n_features=8,
+        n_classes=2,
+        conv_channels=16,
+        num_blocks=1,
+        kernel_size=3,
+        lstm_hidden_size=8,
+        lstm_layers=1,
+        dropout=0.1,
+    )
+    model.eval()
+    x = torch.randn(4, 8, 20)
+
+    features = model.forward_features(x)
+    logits = model.forward_logits_from_features(features)
+
+    assert features.shape == (4, 8)
+    assert logits.shape == (4, 2)
+    assert torch.allclose(model(x), logits)

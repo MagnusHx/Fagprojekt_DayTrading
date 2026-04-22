@@ -20,7 +20,7 @@ class TripleBarrierLabeler:
     name: str
     width_minutes: int
     height: float
-    drop_time_exit_label: bool = False  # if True, label==1 becomes invalid (-1)
+    drop_time_exit_label: bool = False  # legacy field; event-outcome artifacts always persist raw labels
 
     def fit(self, df: pd.DataFrame) -> "TripleBarrierLabeler":
         return self
@@ -40,11 +40,6 @@ class TripleBarrierLabeler:
 
 
             lab = int(res.label)
-            if self.drop_time_exit_label and lab == 1:
-                # keep label invalid; metadata remains available
-                continue
-            if self.drop_time_exit_label and lab == 2:
-                lab = 1
             labels[i] = lab
 
         return labels, metadata

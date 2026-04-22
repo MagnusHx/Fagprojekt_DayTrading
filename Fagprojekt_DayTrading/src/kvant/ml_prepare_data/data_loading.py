@@ -11,6 +11,8 @@ from torch.utils.data import Dataset, DataLoader
 
 from kvant.labels import (
     class_names_from_semantics,
+    event_label_from_metadata,
+    event_labels_to_side_labels,
     label_ids_from_semantics,
     label_meanings_from_semantics,
     validate_label_semantics,
@@ -39,11 +41,19 @@ class PreparedStore:
     def __init__(self, exp_dir: Path):
         self.exp_dir = exp_dir
         self.cfg = json.loads((exp_dir / "config.json").read_text())
+        self.pipeline_stage = str(self.cfg.get("pipeline_stage", "legacy"))
+        self.label_spaces = dict(self.cfg.get("label_spaces") or {})
         self.label_semantics = validate_label_semantics(self.cfg, exp_dir=exp_dir)
         self.label_ids = label_ids_from_semantics(self.label_semantics)
         self.label_meanings = label_meanings_from_semantics(self.label_semantics)
         self.class_names = class_names_from_semantics(self.label_semantics)
         self.n_classes = len(self.label_ids)
+        feature_engineer_cfg = (self.cfg.get("feature_engineer") or {}) if isinstance(self.cfg, dict) else {}
+        feature_names = feature_engineer_cfg.get("feature_names_")
+        self.feature_names = tuple(str(name) for name in feature_names) if feature_names else None
+        self.feature_name_to_index = (
+            {name: idx for idx, name in enumerate(self.feature_names)} if self.feature_names is not None else {}
+        )
         self.tickers_all = json.loads((exp_dir / "tickers_all.json").read_text())
         self.ticker_to_id = {t: i for i, t in enumerate(self.tickers_all)}
 
@@ -93,6 +103,23 @@ class PreparedStore:
         label = int(y[tpos])
         return x_win, label
 
+    def event_label(self, tid: int, tpos: int) -> int:
+        return event_label_from_metadata(self.metadata(tid, tpos), fallback=int(self._labels[int(tid)][int(tpos)]))
+
+    def event_labels_for_index(self, index: np.ndarray) -> np.ndarray:
+        out = np.empty(int(index.shape[0]), dtype=np.int64)
+        for i in range(int(index.shape[0])):
+            tid = int(index[i, 0])
+            tpos = int(index[i, 1])
+            out[i] = self.event_label(tid, tpos)
+        return out
+
+    def side_label(self, tid: int, tpos: int) -> int:
+        return int(event_labels_to_side_labels([self.event_label(tid, tpos)])[0])
+
+    def side_labels_for_index(self, index: np.ndarray) -> np.ndarray:
+        return event_labels_to_side_labels(self.event_labels_for_index(index))
+
     def metadata(self, tid: int, tpos: int) -> Optional[dict]:
         return self._label_metadata[tid][tpos]
 
@@ -132,19 +159,60 @@ class PreparedStore:
             )
         return market_data
 
+    def require_feature_names(self) -> tuple[str, ...]:
+        if self.feature_names is None:
+            raise RuntimeError(
+                "Prepared experiment is missing persisted feature names. "
+                "Regenerate the prepared data before using prepared_last:<feature_name> decision features."
+            )
+        return self.feature_names
+
+    def feature_index(self, feature_name: str) -> int:
+        self.require_feature_names()
+        if feature_name not in self.feature_name_to_index:
+            raise RuntimeError(f"Unknown prepared feature name {feature_name!r}.")
+        return int(self.feature_name_to_index[feature_name])
+
+    def prepared_last_feature_values(self, tids: np.ndarray, tpos: np.ndarray, feature_name: str) -> np.ndarray:
+        feature_idx = self.feature_index(feature_name)
+        out = np.empty(len(tids), dtype=np.float32)
+        for i, (tid, pos) in enumerate(zip(tids, tpos)):
+            row_idx = int(pos) - 1
+            if row_idx < 0:
+                raise RuntimeError(
+                    f"Cannot read prepared_last:{feature_name} for ticker id {int(tid)} at position {int(pos)}."
+                )
+            out[i] = float(self._features[int(tid)][row_idx, feature_idx])
+        return out
+
 
 class IndexWindowDataset(Dataset):
-    def __init__(self, store: PreparedStore, index: np.ndarray, lookback_L: int):
+    def __init__(self, store: PreparedStore, index: np.ndarray, lookback_L: int, *, target_mode: str = "event_outcome"):
         self.store = store
         self.index = index
         self.L = int(lookback_L)
+        self.target_mode = str(target_mode)
+        if self.target_mode not in {"event_outcome", "primary_side"}:
+            raise ValueError(f"Unsupported target_mode={self.target_mode!r}.")
+
+    @property
+    def label_ids(self) -> tuple[int, ...]:
+        if self.target_mode == "primary_side":
+            return (0, 1)
+        return tuple(self.store.label_ids)
+
+    def _target_label(self, tid: int, tpos: int) -> int:
+        if self.target_mode == "primary_side":
+            return self.store.side_label(tid, tpos)
+        return self.store.event_label(tid, tpos)
 
     def __len__(self) -> int:
         return int(self.index.shape[0])
 
     def __getitem__(self, i: int):
         tid, tpos = int(self.index[i, 0]), int(self.index[i, 1])
-        x_win, y = self.store.window_and_label(tid, tpos, self.L)
+        x_win, _ = self.store.window_and_label(tid, tpos, self.L)
+        y = self._target_label(tid, tpos)
 
         x_np = np.array(x_win, dtype=np.float32, copy=True)  # (L, F)
         x_t = torch.from_numpy(x_np.T).contiguous()  # (F, L)
@@ -171,6 +239,75 @@ class IndexWindowDataset(Dataset):
         }
 
     def summary(self, display: bool = True):
+        if self.target_mode == "primary_side":
+            from kvant.ml_prepare_data.data_loading_utils import _print_plain_summary
+
+            label_ids = self.label_ids
+            if self.index is None or int(self.index.shape[0]) == 0:
+                out = {
+                    "overall": {
+                        "n": 0,
+                        "y_counts": {label: 0 for label in label_ids},
+                        "first_ts": None,
+                        "last_ts": None,
+                    },
+                    "per_ticker": {},
+                }
+                if display:
+                    print("(empty dataset)")
+                return out
+
+            tids = self.index[:, 0].astype(np.int64, copy=False)
+            tposs = self.index[:, 1].astype(np.int64, copy=False)
+            per_ticker: Dict[str, Any] = {}
+            overall_counts = {label: 0 for label in label_ids}
+            overall_first_ts = None
+            overall_last_ts = None
+
+            for tid in np.unique(tids):
+                mask = tids == tid
+                pos = tposs[mask]
+                ticker = self.store.ticker(int(tid))
+                side_labels = self.store.side_labels_for_index(self.index[mask])
+                valid_labels = side_labels[side_labels >= 0]
+                counts = {label: int(np.sum(valid_labels == label)) for label in label_ids}
+                for label in label_ids:
+                    overall_counts[label] += counts[label]
+                ts_arr = self.store._timestamps[int(tid)]
+                first_ts = ts_arr[int(pos.min())]
+                last_ts = ts_arr[int(pos.max())]
+                if overall_first_ts is None or first_ts < overall_first_ts:
+                    overall_first_ts = first_ts
+                if overall_last_ts is None or last_ts > overall_last_ts:
+                    overall_last_ts = last_ts
+                per_ticker[ticker] = {
+                    "tid": int(tid),
+                    "n": int(mask.sum()),
+                    "y_counts": counts,
+                    "first_ts": str(np.datetime_as_string(first_ts, unit="s")),
+                    "last_ts": str(np.datetime_as_string(last_ts, unit="s")),
+                }
+
+            out = {
+                "overall": {
+                    "n": int(len(self.index)),
+                    "y_counts": overall_counts,
+                    "first_ts": None
+                    if overall_first_ts is None
+                    else str(np.datetime_as_string(overall_first_ts, unit="s")),
+                    "last_ts": None if overall_last_ts is None else str(np.datetime_as_string(overall_last_ts, unit="s")),
+                },
+                "per_ticker": per_ticker,
+            }
+            if display:
+                headers = ["ticker", "n", *[f"y={label}" for label in label_ids], "first_ts", "last_ts"]
+                rows = []
+                for ticker in sorted(per_ticker.keys()):
+                    d = per_ticker[ticker]
+                    rows.append([ticker, d["n"], *[d["y_counts"][label] for label in label_ids], d["first_ts"], d["last_ts"]])
+                _print_plain_summary(headers, rows)
+            return out
+
         from kvant.ml_prepare_data.data_loading_utils import summary
 
         return summary(self, display=display)
@@ -208,6 +345,12 @@ class PreparedExperiment:
         ds_test = IndexWindowDataset(self.store, self.index_test, self.L)
         return ds_train, ds_val, ds_test
 
+    def get_primary_side_datasets(self) -> Tuple[IndexWindowDataset, IndexWindowDataset, IndexWindowDataset]:
+        ds_train = IndexWindowDataset(self.store, self.index_train, self.L, target_mode="primary_side")
+        ds_val = IndexWindowDataset(self.store, self.index_val, self.L, target_mode="primary_side")
+        ds_test = IndexWindowDataset(self.store, self.index_test, self.L, target_mode="primary_side")
+        return ds_train, ds_val, ds_test
+
     def get_loaders(
         self,
         train_batch_size: int = 256,
@@ -228,6 +371,38 @@ class PreparedExperiment:
             ds_val,
             batch_size=eval_batch_size,
             shuffle=False,  # keep this for alignment / reproducibility
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
+        dl_test = DataLoader(
+            ds_test,
+            batch_size=eval_batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
+        return dl_train, dl_val, dl_test
+
+    def get_primary_side_loaders(
+        self,
+        train_batch_size: int = 256,
+        eval_batch_size: int = 512,
+        num_workers: int = 0,
+        pin_memory: bool = True,
+    ) -> Tuple[DataLoader, DataLoader, DataLoader]:
+        ds_train, ds_val, ds_test = self.get_primary_side_datasets()
+
+        dl_train = DataLoader(
+            ds_train,
+            batch_size=train_batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
+        dl_val = DataLoader(
+            ds_val,
+            batch_size=eval_batch_size,
+            shuffle=False,
             num_workers=num_workers,
             pin_memory=pin_memory,
         )

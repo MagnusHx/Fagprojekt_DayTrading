@@ -13,6 +13,7 @@ def class_weights_from_dataset(ds: Dataset, n_classes: int = 3) -> np.ndarray:
         ys.append(y.detach().cpu().numpy())
 
     y_all = np.concatenate(ys) if ys else np.asarray([], dtype=np.int64)
+    y_all = y_all[y_all >= 0]
     if len(y_all) == 0:
         return np.ones(n_classes, dtype=np.float32)
 

@@ -85,13 +85,13 @@ class OHLCVFeatures(BaseDFEngineer):
 
 # ---------------------------------------------------------------------
 # 2) TA10 indicator set aligned to the paper’s feature section
-#     (computed after sampling; scaling is handled separately by wrapper)
+#     (computed on minute data; scaling is handled separately by wrapper)
 # ---------------------------------------------------------------------
 @dataclass
 class IntradayTA10Features(BaseDFEngineer):
     """
     Implements the 10 feature groups described in the paper’s feature engineering section
-    (computed after sampling) .
+    on the full minute-resolution series before sampling.
     """
 
     name: str = "intraday_ta10"

@@ -50,6 +50,9 @@ class Trainer:
 
             x = x.to(self.device, non_blocking=True)
             y = y.to(self.device, non_blocking=True)
+            valid_mask = y >= 0
+            if not bool(torch.any(valid_mask)):
+                continue
 
             self.optimizer.zero_grad(set_to_none=True)
             logits = self.model(x)
@@ -72,10 +75,13 @@ class Trainer:
             x, y = batch[0], batch[1]
             x = x.to(self.device, non_blocking=True)
             y = y.to(self.device, non_blocking=True)
+            valid_mask = y >= 0
+            if not bool(torch.any(valid_mask)):
+                continue
 
             pred = torch.argmax(self.model(x), dim=1)
-            n_correct += int((pred == y).sum().item())
-            n_total += int(y.numel())
+            n_correct += int((pred[valid_mask] == y[valid_mask]).sum().item())
+            n_total += int(valid_mask.sum().item())
 
         return float(n_correct / max(n_total, 1))
 
@@ -90,6 +96,9 @@ class Trainer:
             x, y = batch[0], batch[1]
             x = x.to(self.device, non_blocking=True)
             y = y.to(self.device, non_blocking=True)
+            valid_mask = y >= 0
+            if not bool(torch.any(valid_mask)):
+                continue
 
             logits = self.model(x)
             loss = self.criterion(logits, y)

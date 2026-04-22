@@ -1,6 +1,7 @@
 from .backtest import BacktestTrade, BacktestTradeSimulator, compute_paper_trading_metrics
 from .classification_metrics import classification_metrics
 from .trading_metrics import (
+    apply_trade_decision_bands,
     apply_trade_decision_thresholds,
     apply_trade_confidence_threshold,
     compute_action_profit_stats,
@@ -13,6 +14,7 @@ from .trading_metrics import (
 
 __all__ = [
     "classification_metrics",
+    "apply_trade_decision_bands",
     "apply_trade_decision_thresholds",
     "apply_trade_confidence_threshold",
     "BacktestTrade",

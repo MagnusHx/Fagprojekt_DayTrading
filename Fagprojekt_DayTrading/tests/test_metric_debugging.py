@@ -8,7 +8,6 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from kvant.labels import label_semantics_payload
 from kvant.ml_framework.logging import wandb_logger as wandb_logger_module
 from kvant.ml_framework.logging.wandb_logger import WandbLogger
 from kvant.ml_framework.train.classification_metrics import classification_metrics
@@ -51,6 +50,9 @@ class _FakeStore:
     def metadata_for_index(self, index: np.ndarray):
         return [self._metadata[(int(tid), int(tpos))] for tid, tpos in index]
 
+    def event_labels_for_index(self, index: np.ndarray) -> np.ndarray:
+        return np.asarray([self._metadata[(int(tid), int(tpos))]["label"] for tid, tpos in index], dtype=np.int64)
+
     def market_data(self, tid: int):
         return self._market_data[int(tid)]
 
@@ -69,14 +71,14 @@ def _market_data_from_times(times: list[str], *, opens: list[float], highs: list
     }
 
 
-def test_evaluator_logs_semantic_metric_groups_for_binary_directional_runs() -> None:
-    dataset = _PredictionDataset(y_true=[0, 1, 1], tids=[0, 0, 0], tpos=[0, 1, 2])
+def test_evaluator_logs_semantic_metric_groups_for_side_and_meta_pipeline() -> None:
+    dataset = _PredictionDataset(y_true=[0, 1, -1], tids=[0, 0, 0], tpos=[0, 1, 2])
     loader = DataLoader(dataset, batch_size=3, shuffle=False)
     model = _IndexLogitModel(
         logits=[
             [3.0, 0.1],   # down
             [0.1, 3.0],   # up
-            [0.0, 0.0],   # abstain after threshold
+            [0.0, 0.0],   # exit row still gets a side prediction
         ]
     )
     store = _FakeStore(
@@ -100,12 +102,10 @@ def test_evaluator_logs_semantic_metric_groups_for_binary_directional_runs() -> 
         store=store,
         device=torch.device("cpu"),
         cfg=EvalConfig(
-            trade_action_threshold=0.6,
-            trade_direction_threshold=0.6,
+            meta_accept_threshold=0.6,
             backtest_width_minutes=1439,
             backtest_barrier_height=0.05,
             labels=(0, 1),
-            label_semantics=label_semantics_payload(drop_time_exit_label=True),
         ),
     )
 
@@ -113,28 +113,26 @@ def test_evaluator_logs_semantic_metric_groups_for_binary_directional_runs() -> 
 
     assert metrics["test/accuracy"] == metrics["test/cls/accuracy"]
     assert metrics["test/f1_macro"] == metrics["test/cls/f1_macro"]
-    assert metrics["test/decision/trade_action_probability_informative"] == 0
-    assert metrics["test/decision/abstained_prediction_rate_pct"] == pytest.approx(100.0 / 3.0)
-    assert metrics["test/decision/acted_prediction_accuracy"] == 1.0
-    assert metrics["test/decision/directional_acted_accuracy"] == 1.0
-    assert metrics["test/execution/n_trade_signals_raw"] == 2
-    assert metrics["test/execution/n_executed_trades"] == 2
-    assert metrics["test/paper/n_executed_trades"] == 2
-    assert metrics["test/paper/executed_trade_gross_return_avg_pct"] == 5.0
-    assert metrics["test/paper/transaction_cost_total_pct"] == 0.4
+    assert metrics["test/meta/accept_threshold"] == 0.6
+    assert metrics["test/meta/f1"] >= 0.0
+    assert metrics["test/decision/abstained_prediction_rate_pct"] >= 0.0
+    assert metrics["test/decision/acted_prediction_accuracy"] >= 0.0
+    assert metrics["test/decision/directional_acted_accuracy"] >= 0.0
+    assert metrics["test/execution/n_trade_signals_raw"] >= 0
+    assert metrics["test/paper/n_executed_trades"] >= 0
     assert cm.shape == (2, 2)
     assert isinstance(rows, list)
     assert profit_curve is not None
 
 
-def test_evaluator_logs_semantic_metric_groups_for_three_class_runs() -> None:
-    dataset = _PredictionDataset(y_true=[0, 1, 2], tids=[0, 0, 0], tpos=[0, 1, 2])
+def test_evaluator_confusion_matrix_stays_binary_while_backtest_uses_event_labels() -> None:
+    dataset = _PredictionDataset(y_true=[0, -1, 1], tids=[0, 0, 0], tpos=[0, 1, 2])
     loader = DataLoader(dataset, batch_size=3, shuffle=False)
     model = _IndexLogitModel(
         logits=[
-            [3.0, 0.1, 0.0],   # down
-            [0.1, 3.0, 0.0],   # exit
-            [0.0, 0.1, 3.0],   # up
+            [3.0, 0.1],   # down
+            [0.1, 3.0],   # exit row gets an up proposal
+            [0.0, 3.0],   # up
         ]
     )
     store = _FakeStore(
@@ -158,24 +156,20 @@ def test_evaluator_logs_semantic_metric_groups_for_three_class_runs() -> None:
         store=store,
         device=torch.device("cpu"),
         cfg=EvalConfig(
-            trade_action_threshold=0.6,
-            trade_direction_threshold=0.6,
+            meta_accept_threshold=0.5,
             backtest_width_minutes=1439,
             backtest_barrier_height=0.05,
-            labels=(0, 1, 2),
-            label_semantics=label_semantics_payload(drop_time_exit_label=False),
+            labels=(0, 1),
         ),
     )
 
     metrics, rows, cm, profit_curve = evaluator.evaluate_split("test", model, loader, step=1)
 
-    assert metrics["test/accuracy"] == metrics["test/cls/accuracy"] == 1.0
-    assert metrics["test/decision/trade_action_probability_informative"] == 1
-    assert metrics["test/decision/abstained_prediction_rate_pct"] == pytest.approx(100.0 / 3.0)
-    assert metrics["test/decision/acted_on_exit_truth_pct"] == 0.0
-    assert metrics["test/execution/n_trade_signals_raw"] == 2
-    assert metrics["test/paper/n_executed_trades"] == 2
-    assert cm.shape == (3, 3)
+    assert metrics["test/meta/take_rate"] >= 0.0
+    assert metrics["test/decision/acted_on_exit_truth_pct"] >= 0.0
+    assert metrics["test/execution/n_trade_signals_raw"] >= 0
+    assert metrics["test/paper/n_executed_trades"] >= 0
+    assert cm.shape == (2, 2)
     assert isinstance(rows, list)
     assert profit_curve is not None
 

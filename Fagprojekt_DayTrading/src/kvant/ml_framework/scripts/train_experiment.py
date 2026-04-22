@@ -17,7 +17,13 @@ from kvant.ml_framework.run_validation import (
 )
 from kvant.ml_prepare_data.data_loading import PreparedExperiment
 from kvant.ml_framework.models import create_model
-from kvant.ml_framework.train import Trainer, TrainConfig, ExperimentEvaluator, EvalConfig
+from kvant.ml_framework.train import (
+    Trainer,
+    TrainConfig,
+    ExperimentEvaluator,
+    EvalConfig,
+    normalize_meta_features,
+)
 from kvant.ml_framework.train.utils import class_weights_from_dataset
 from kvant.ml_framework.logging import WandbLogger
 
@@ -27,6 +33,22 @@ from dotenv import load_dotenv
 load_dotenv()
 default_project = os.environ.get("WANDB_PROJECT", "Kvant")
 entity = os.environ.get("WANDB_ENTITY", "s245509-danmarks-tekniske-universitet-dtu")
+
+
+def _apply_baseline_preset(args: argparse.Namespace) -> argparse.Namespace:
+    """Apply the baseline preset."""
+    if not getattr(args, "baseline", False):
+        return args
+
+    args.model = "conv1d"
+    args.transaction_cost = 0.0
+    if not args.wandb_name:
+        args.wandb_name = "baseline-conv1d-cost0"
+    return args
+
+
+def _parse_meta_features(values: list[str] | None) -> tuple[str, ...]:
+    return normalize_meta_features(values)
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +75,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=1337)
     p.add_argument("--lr", type=float, default=5e-3)
     p.add_argument("--weight-decay", type=float, default=5e-5)
+    p.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Preset a baseline launch with model=conv1d and transaction_cost=0.0.",
+    )
     p.add_argument("--model", type=str, choices=("conv1d", "resnet_lstm"), default="conv1d")
     p.add_argument("--model-dropout", type=float, default=0.3)
     p.add_argument("--resnet-channels", type=int, default=64)
@@ -66,28 +93,23 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wandb-name", type=str, default=None)
     p.add_argument("--wandb-api-timeout", type=int, default=29)
     p.add_argument("--no-return-stats", action="store_true")
+    p.add_argument("--pipeline-stage", type=str, choices=("primary_side",), default="primary_side")
     p.add_argument("--initial-portfolio", type=float, default=1.0)
     p.add_argument("--transaction-cost", type=float, default=0.001)
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
     p.add_argument(
-        "--trade-confidence-threshold",
+        "--meta-accept-threshold",
         type=float,
         default=0.5,
-        help="Legacy alias for --trade-action-threshold; kept for backwards compatibility.",
+        help="Minimum meta-label probability required before taking the primary side prediction.",
     )
     p.add_argument(
-        "--trade-action-threshold",
-        type=float,
+        "--meta-features",
+        action="append",
         default=None,
-        help="Minimum p(up)+p(down) required before the model is allowed to trade.",
-    )
-    p.add_argument(
-        "--trade-direction-threshold",
-        type=float,
-        default=0.6,
-        help="Directional confidence threshold on q_up = p(up)/(p(up)+p(down)); "
-        "shorts use the symmetric lower band 1-threshold.",
+        help="Repeatable or comma-separated meta-label feature tokens. "
+        "Supported: proba, logits, embedding, prepared_last:<feature_name>.",
     )
     p.add_argument("--topk-ticker-plots", type=int, default=50)
     p.add_argument(
@@ -107,16 +129,10 @@ def parse_args() -> argparse.Namespace:
         help="Disable writing a local best-checkpoint bundle for offline metric reconciliation.",
     )
     args = p.parse_args()
-    args.trade_action_threshold = (
-        args.trade_action_threshold
-        if args.trade_action_threshold is not None
-        else args.trade_confidence_threshold
-    )
-    args.trade_confidence_threshold = args.trade_action_threshold
-    if not (0.0 <= args.trade_action_threshold <= 1.0):
-        raise SystemExit("--trade-action-threshold must be between 0 and 1.")
-    if not (0.5 <= args.trade_direction_threshold <= 1.0):
-        raise SystemExit("--trade-direction-threshold must be between 0.5 and 1.0.")
+    args = _apply_baseline_preset(args)
+    args.meta_features = _parse_meta_features(args.meta_features)
+    if not (0.0 <= args.meta_accept_threshold <= 1.0):
+        raise SystemExit("--meta-accept-threshold must be between 0 and 1.")
     if args.train_batch_size <= 0 or args.eval_batch_size <= 0 or args.epochs <= 0:
         raise SystemExit("epochs and batch sizes must be positive.")
     return args
@@ -156,9 +172,11 @@ def _save_best_checkpoint_bundle(
         "exp_dir": str(exp_dir),
         "fold_tag": fold_tag,
         "best_metric": float(best_metric),
-        "checkpoint_metric": "val/accuracy",
-        "label_semantics": exp.label_semantics,
-        "label_ids": list(exp.label_ids),
+        "checkpoint_metric": "val/meta/f1",
+        "run_stage": str(args.pipeline_stage),
+        "event_label_semantics": exp.label_semantics,
+        "event_label_ids": list(exp.label_ids),
+        "primary_label_ids": [0, 1],
         "model_name": args.model,
         "model_kwargs": _model_kwargs(args),
         "model_state": best_state,
@@ -170,13 +188,14 @@ def _save_best_checkpoint_bundle(
             "compute_per_ticker_accuracy": True,
             "compute_profit_stats": not args.no_return_stats,
             "compute_paper_trading_metrics": not args.no_return_stats,
+            "meta_model": "logreg",
+            "meta_features": list(args.meta_features),
+            "meta_random_state": int(args.seed),
+            "meta_accept_threshold": float(args.meta_accept_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
-            "trade_confidence_threshold": args.trade_confidence_threshold,
-            "trade_action_threshold": args.trade_action_threshold,
-            "trade_direction_threshold": args.trade_direction_threshold,
             "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0)),
             "backtest_barrier_height": float(labeler_cfg.get("height", 0.0)),
         },
@@ -216,13 +235,14 @@ def _make_logger(
             "train_batch_size": args.train_batch_size,
             "eval_batch_size": args.eval_batch_size,
             "class_weights": None,
+            "pipeline_stage": args.pipeline_stage,
+            "meta_model": "logreg",
+            "meta_features": list(args.meta_features),
+            "meta_accept_threshold": float(args.meta_accept_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
-            "trade_confidence_threshold": args.trade_confidence_threshold,
-            "trade_action_threshold": args.trade_action_threshold,
-            "trade_direction_threshold": args.trade_direction_threshold,
             "backtest_width_minutes": None,
             "backtest_barrier_height": None,
         },
@@ -251,15 +271,17 @@ def _runtime_metadata(args: argparse.Namespace, *, exp_dir: Path, fold_tag: str 
         "exp_dir": str(exp_dir),
         "fold_tag": fold_tag,
         "label_regime": label_regime,
+        "pipeline_stage": str(args.pipeline_stage),
         "model_name": args.model,
         "model_kwargs": _model_kwargs(args),
         "seed_python": int(args.seed),
         "seed_numpy": int(args.seed),
         "seed_torch": int(args.seed),
         "epochs": int(args.epochs),
+        "meta_model": "logreg",
+        "meta_features": list(args.meta_features),
+        "meta_accept_threshold": float(args.meta_accept_threshold),
         "transaction_cost": float(args.transaction_cost),
-        "trade_action_threshold": float(args.trade_action_threshold),
-        "trade_direction_threshold": float(args.trade_direction_threshold),
         "require_market_data": bool(not args.no_return_stats),
         "preflight": preflight,
     }
@@ -276,7 +298,13 @@ def run_single_fold(
     _write_json_artifact(runtime_dir / "preflight.json", preflight)
 
     exp = PreparedExperiment(exp_dir)
-    dl_train, dl_val, dl_test = exp.get_loaders(
+    if exp.store.pipeline_stage != "event_outcome" or exp.n_classes != 3:
+        raise RuntimeError(
+            "The Lopez de Prado pipeline expects event-outcome prepared artifacts with raw triple-barrier labels. "
+            "Regenerate the prepared experiment before training."
+        )
+
+    dl_train, dl_val, dl_test = exp.get_primary_side_loaders(
         train_batch_size=args.train_batch_size,
         eval_batch_size=args.eval_batch_size,
         num_workers=0,
@@ -293,7 +321,7 @@ def run_single_fold(
     )
 
     # Optional local sanity check
-    ds_train, ds_val, ds_test = exp.get_datasets()
+    ds_train, ds_val, ds_test = exp.get_primary_side_datasets()
 
     if args.print_dataset_summary:
         for ds, split_name in [(ds_train, "train"), (ds_val, "val"), (ds_test, "test")]:
@@ -305,13 +333,13 @@ def run_single_fold(
     model = create_model(
         model_name=args.model,
         n_features=exp.store.n_features,
-        n_classes=exp.n_classes,
+        n_classes=2,
         **_model_kwargs(args),
     ).to(device)
     labeler_cfg = exp.cfg.get("labeler", {})
 
-    w = class_weights_from_dataset(ds_train, n_classes=exp.n_classes)
-    criterion = nn.CrossEntropyLoss(weight=torch.tensor(w, device=device))
+    w = class_weights_from_dataset(ds_train, n_classes=2)
+    criterion = nn.CrossEntropyLoss(weight=torch.tensor(w, device=device), ignore_index=-1)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     owns_logger = logger is None
@@ -334,15 +362,16 @@ def run_single_fold(
             "train_batch_size": args.train_batch_size,
             "eval_batch_size": args.eval_batch_size,
             "class_weights": w.tolist(),
-            "n_classes": exp.n_classes,
-            "label_semantics": exp.label_semantics,
+            "n_classes": 2,
+            "event_label_semantics": exp.label_semantics,
+            "pipeline_stage": args.pipeline_stage,
+            "meta_model": "logreg",
+            "meta_features": list(args.meta_features),
+            "meta_accept_threshold": float(args.meta_accept_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
-            "trade_confidence_threshold": args.trade_confidence_threshold,
-            "trade_action_threshold": args.trade_action_threshold,
-            "trade_direction_threshold": args.trade_direction_threshold,
             "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0)),
             "backtest_barrier_height": float(labeler_cfg.get("height", 0.0)),
             "runtime_metadata": _runtime_metadata(args, exp_dir=exp_dir, fold_tag=fold_tag, preflight=preflight),
@@ -363,17 +392,17 @@ def run_single_fold(
                 compute_per_ticker_accuracy=True,
                 compute_profit_stats=not args.no_return_stats,
                 compute_paper_trading_metrics=not args.no_return_stats,
+                meta_model="logreg",
+                meta_features=args.meta_features,
+                meta_random_state=int(args.seed),
+                meta_accept_threshold=float(args.meta_accept_threshold),
                 initial_portfolio=args.initial_portfolio,
                 transaction_cost=args.transaction_cost,
                 risk_free_rate=args.risk_free_rate,
                 days_per_year=args.days_per_year,
-                trade_confidence_threshold=args.trade_confidence_threshold,
-                trade_action_threshold=args.trade_action_threshold,
-                trade_direction_threshold=args.trade_direction_threshold,
                 backtest_width_minutes=int(labeler_cfg.get("width_minutes", 0)),
                 backtest_barrier_height=float(labeler_cfg.get("height", 0.0)),
-                labels=exp.label_ids,
-                label_semantics=exp.label_semantics,
+                labels=(0, 1),
             ),
         )
 
@@ -392,7 +421,7 @@ def run_single_fold(
             weight_decay=args.weight_decay,
             train_batch_size=args.train_batch_size,
             eval_batch_size=args.eval_batch_size,
-            checkpoint_metric="val/accuracy",
+            checkpoint_metric="val/meta/f1",
         )
 
         out = trainer.fit(

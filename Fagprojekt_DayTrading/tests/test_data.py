@@ -1,6 +1,8 @@
 import json
+from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 
 import pytest
 
@@ -13,6 +15,7 @@ from kvant.labels import (
 from kvant.ml_framework.run_validation import RunValidationError, validate_cv_manifest, validate_prepared_experiment
 from kvant.ml_framework.scripts.smoke_prepared_experiment import _smoke_one
 from kvant.ml_prepare_data.data_loading import PreparedExperiment
+from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
 
 
 def _write_ticker_fixture(exp_dir, ticker: str, *, labels: list[int], market_rows: int | None = None) -> None:
@@ -132,6 +135,99 @@ def test_smoke_one_materializes_batch_and_forward_pass(tmp_path) -> None:
     assert report["n_classes"] == 3
     assert report["batch_shape"][0] == 1
     assert report["logits_shape"] == [1, 3]
+
+
+def test_primary_side_datasets_keep_exit_rows_ignored(tmp_path) -> None:
+    exp_dir = _write_prepared_fixture(tmp_path, binary=False, with_market_data=True)
+    exp = PreparedExperiment(exp_dir)
+
+    ds_train, ds_val, ds_test = exp.get_primary_side_datasets()
+
+    assert ds_train[0][1].item() in (0, 1)
+    assert ds_val[0][1].item() in (0, 1)
+    assert ds_test[0][1].item() == -1
+
+
+class _EveryOtherSampler(BaseBarSampler):
+    def transform(self, df: pd.DataFrame, *, ticker: str) -> pd.DataFrame:
+        return df.iloc[1::2].copy()
+
+
+@dataclass
+class _LaggedDiffFeatureEngineer:
+    name: str = "lagged_diff"
+
+    def fit(self, df: pd.DataFrame):
+        return self
+
+    def transform(self, df: pd.DataFrame):
+        close = df["close"].astype(float)
+        feat = pd.DataFrame({"close_diff_prev_minute": close.diff().fillna(0.0)}, index=df.index)
+        return feat.to_numpy(dtype=np.float32), list(feat.columns)
+
+    def get_meta(self) -> dict:
+        return {"name": self.name}
+
+
+@dataclass
+class _ConstantUpLabeler:
+    name: str = "constant_up"
+
+    def fit(self, df: pd.DataFrame):
+        return self
+
+    def transform(self, df: pd.DataFrame):
+        labels = np.full(len(df), 2, dtype=np.int8)
+        metadata = [
+            {
+                "label": 2,
+                "bar_open_time": str(ts),
+                "bar_close_time": str(ts),
+                "pnl_fraction": 0.01,
+                "pnl_absolute": 1.0,
+            }
+            for ts in df.index
+        ]
+        return labels, metadata
+
+
+def test_prepare_experiment_computes_features_before_sampling(tmp_path) -> None:
+    from kvant.ml_prepare_data.prepare_experiment import ExperimentConfig, prepare_experiment
+
+    idx = pd.date_range("2024-01-01 09:30:00", periods=6, freq="min", tz="UTC")
+    df = pd.DataFrame(
+        {
+            "open": [10, 11, 12, 13, 14, 15],
+            "high": [10, 11, 12, 13, 14, 15],
+            "low": [10, 11, 12, 13, 14, 15],
+            "close": [10, 11, 12, 13, 14, 15],
+            "volume": [100, 101, 102, 103, 104, 105],
+        },
+        index=idx,
+    )
+    cfg = ExperimentConfig(
+        experiment_name="minute_before_sampling",
+        sampler={"name": "every_other"},
+        feature_engineer={"name": "lagged_diff"},
+        labeler={"name": "constant_up"},
+        lookback_L=1,
+    )
+
+    prepared = prepare_experiment(
+        out_root=tmp_path,
+        cfg=cfg,
+        sampler=_EveryOtherSampler(name="every_other"),
+        fe=_LaggedDiffFeatureEngineer(),
+        labeler=_ConstantUpLabeler(),
+        ticker_dfs_train={"AAA": df.iloc[:4]},
+        ticker_dfs_val={"AAA": df.iloc[4:5]},
+        ticker_dfs_test={"AAA": df.iloc[5:]},
+        experiment_id="minute_before_sampling",
+    )
+
+    saved = np.load(prepared.exp_dir / "tickers" / "AAA" / "features.npy")
+
+    np.testing.assert_allclose(saved[:, 0], np.asarray([1.0, 1.0, 1.0], dtype=np.float32))
 
 
 def test_validate_cv_manifest_accepts_pointer_txt(tmp_path) -> None:

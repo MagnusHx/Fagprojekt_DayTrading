@@ -98,14 +98,33 @@ def apply_trade_decision_thresholds(
     trade_direction_threshold: float,
 ) -> np.ndarray:
     """Map class probabilities to down/exit/up using action and directional thresholds."""
+    p_act, q_up = trade_decision_components(y_pred_proba=y_pred_proba)
+    return apply_trade_decision_bands(
+        p_act=p_act,
+        q_up=q_up,
+        trade_action_threshold=trade_action_threshold,
+        trade_direction_threshold=trade_direction_threshold,
+    )
+
+
+def apply_trade_decision_bands(
+    *,
+    p_act: np.ndarray,
+    q_up: np.ndarray,
+    trade_action_threshold: float,
+    trade_direction_threshold: float,
+) -> np.ndarray:
+    """Map action mass and directional probability to down/exit/up."""
     if not (0.0 <= float(trade_action_threshold) <= 1.0):
         raise ValueError("trade_action_threshold must be between 0 and 1")
     if not (0.5 <= float(trade_direction_threshold) <= 1.0):
         raise ValueError("trade_direction_threshold must be between 0.5 and 1.0")
+    p_act = np.asarray(p_act, dtype=np.float64)
+    q_up = np.asarray(q_up, dtype=np.float64)
+    if len(p_act) != len(q_up):
+        raise ValueError(f"p_act and q_up must have the same length, got {len(p_act)} and {len(q_up)}.")
 
-    p_act, q_up = trade_decision_components(y_pred_proba=y_pred_proba)
     out = np.full(len(p_act), LABEL_EXIT, dtype=np.int64)
-
     actionable = p_act >= float(trade_action_threshold)
     out[actionable & (q_up >= float(trade_direction_threshold))] = LABEL_UP
     out[actionable & (q_up <= 1.0 - float(trade_direction_threshold))] = LABEL_DOWN

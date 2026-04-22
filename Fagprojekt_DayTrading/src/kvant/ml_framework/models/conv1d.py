@@ -8,21 +8,25 @@ class Conv1DClassifier(nn.Module):
     def __init__(self, n_features: int, n_classes: int = 3, *, dropout: float = 0.3):
         super().__init__()
         dropout_rate = float(dropout)
-        self.net = nn.Sequential(
+        self.features = nn.Sequential(
             nn.Conv1d(n_features, 32, kernel_size=5, padding=2),
             nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
-
             nn.Conv1d(32, 64, kernel_size=5, padding=2),
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
-
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),
-            nn.Linear(64, n_classes),
         )
+        self.classifier = nn.Linear(64, n_classes)
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        return self.features(x)
+
+    def forward_logits_from_features(self, features: torch.Tensor) -> torch.Tensor:
+        return self.classifier(features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+        return self.forward_logits_from_features(self.forward_features(x))

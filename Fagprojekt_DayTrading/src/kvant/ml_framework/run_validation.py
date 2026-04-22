@@ -220,7 +220,10 @@ def validate_prepared_experiment(
     if std_ is not None and len(std_) != n_features:
         raise RunValidationError(f"{exp_dir}: feature_engineer.std_ has length {len(std_)}, expected {n_features}.")
 
-    label_regime = "binary" if exp.n_classes == 2 else "three_class"
+    if getattr(exp.store, "pipeline_stage", "legacy") == "event_outcome":
+        label_regime = "event_outcome"
+    else:
+        label_regime = "binary" if exp.n_classes == 2 else "three_class"
     split_summaries = {
         "train": _split_summary(exp, "train", exp.index_train),
         "val": _split_summary(exp, "val", exp.index_val),
