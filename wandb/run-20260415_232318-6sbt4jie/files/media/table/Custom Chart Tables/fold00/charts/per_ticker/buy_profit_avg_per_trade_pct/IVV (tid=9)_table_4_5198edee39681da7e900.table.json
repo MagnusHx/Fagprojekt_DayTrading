@@ -1,1 +1,0 @@
-{"columns": ["step", "lineKey", "lineVal"], "data": [[1, "train", -0.04794612332326756], [2, "train", -0.15024674864923615], [3, "train", -0.003214788736529174], [4, "train", 0.14943736476792305], [1, "val", NaN], [2, "val", NaN], [3, "val", NaN], [4, "val", NaN], [1, "test", NaN], [2, "test", NaN], [3, "test", NaN], [4, "test", NaN]]}
