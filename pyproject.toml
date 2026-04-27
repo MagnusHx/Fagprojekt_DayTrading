@@ -24,6 +24,7 @@ dependencies = [
     "pandas-market-calendars>=5.0.0",
     "pandas>=3.0.1",
     "pyarrow>=23.0.1",
+    "python-docx>=1.2.0",
     "python-dotenv>=1.2.2",
     "scikit-learn>=1.5.2",
     "torch==2.6.0",
