@@ -647,6 +647,7 @@ class WandbLogger:
         confusion_counts = metrics.pop("_confusion_counts", None)
         confusion_class_names = metrics.pop("_confusion_class_names", None)
         profit_curves = metrics.pop("_profit_curves", None)
+        portfolio_curves = metrics.pop("_portfolio_curves", None)
         local_step = None if step is None else int(step)
         step = self._normalize_step(step)
 
@@ -705,6 +706,40 @@ class WandbLogger:
                             "trade_number",
                             "cum_profit_pct",
                             title=f"Cumulative profit over trades ({split})",
+                        )
+                    },
+                    step=step,
+                    optional=False,
+                )
+
+        if isinstance(portfolio_curves, list):
+            for curve in portfolio_curves:
+                split = str(curve.get("split", "unknown"))
+                timestamps = curve.get("timestamp", [])
+                equity = curve.get("equity", [])[1:]
+                cash = curve.get("cash", [])[1:]
+                exposure_pct = curve.get("exposure_pct", [])[1:]
+                open_positions = curve.get("open_positions", [])[1:]
+                if not timestamps or not equity:
+                    continue
+
+                table = wandb.Table(
+                    columns=["step", "timestamp", "equity", "cash", "exposure_pct", "open_positions"]
+                )
+                for idx, (timestamp, eq, ca, ex, op) in enumerate(
+                    zip(timestamps, equity, cash, exposure_pct, open_positions),
+                    start=1,
+                ):
+                    table.add_data(int(idx), str(timestamp), float(eq), float(ca), float(ex), int(op))
+
+                self._wandb_log({f"perf/portfolio_equity_curve/{split}": table}, step=step, optional=False)
+                self._wandb_log(
+                    {
+                        f"charts/portfolio_equity/{split}": wandb.plot.line(
+                            table,
+                            "step",
+                            "equity",
+                            title=f"Portfolio equity ({split})",
                         )
                     },
                     step=step,

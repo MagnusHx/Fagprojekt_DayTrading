@@ -43,9 +43,9 @@ def test_compute_paper_trading_metrics() -> None:
                         ]
                     ),
                     "open": np.asarray([100.0, 100.0, 100.0, 100.0], dtype=np.float32),
-                    "high": np.asarray([106.0, 101.0, 104.0, 100.0], dtype=np.float32),
-                    "low": np.asarray([99.0, 94.0, 94.0, 100.0], dtype=np.float32),
-                    "close": np.asarray([105.0, 94.0, 95.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([100.0, 106.0, 104.0, 100.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 99.0, 94.0, 94.0], dtype=np.float32),
+                    "close": np.asarray([100.0, 105.0, 95.0, 95.0], dtype=np.float32),
                     "volume": np.asarray([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
                 }
             }
@@ -93,7 +93,7 @@ def test_compute_paper_trading_metrics() -> None:
     assert out["paper/profitable_transactions_pct"] == pytest.approx((2.0 / 3.0) * 100.0)
     assert out["paper/max_drawdown_pct"] == pytest.approx(5.0)
 
-    daily_returns = np.asarray([0.0, -0.05, 0.05, 0.0], dtype=np.float64)
+    daily_returns = np.asarray([0.0, 0.05, -0.05, 0.05], dtype=np.float64)
     expected_sharpe = np.sqrt(4.0) * (daily_returns.mean() / daily_returns.std(ddof=0))
     assert out["paper/sharpe_ratio_annualized"] == pytest.approx(expected_sharpe)
 
@@ -310,13 +310,14 @@ def test_compute_paper_trading_metrics_exposes_abstention_debug_metrics_for_dire
                             np.datetime64("2024-01-01T00:00:00"),
                             np.datetime64("2024-01-02T00:00:00"),
                             np.datetime64("2024-01-03T00:00:00"),
+                            np.datetime64("2024-01-04T00:00:00"),
                         ]
                     ),
-                    "open": np.asarray([100.0, 100.0, 100.0], dtype=np.float32),
-                    "high": np.asarray([100.0, 100.0, 106.0], dtype=np.float32),
-                    "low": np.asarray([100.0, 94.0, 100.0], dtype=np.float32),
-                    "close": np.asarray([100.0, 95.0, 105.0], dtype=np.float32),
-                    "volume": np.asarray([1.0, 1.0, 1.0], dtype=np.float32),
+                    "open": np.asarray([100.0, 100.0, 100.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([100.0, 100.0, 100.0, 106.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 100.0, 94.0, 100.0], dtype=np.float32),
+                    "close": np.asarray([100.0, 100.0, 95.0, 105.0], dtype=np.float32),
+                    "volume": np.asarray([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
                 }
             }
         ),
@@ -373,9 +374,9 @@ def test_compute_paper_trading_metrics_scales_portfolio_by_bet_size() -> None:
                         ]
                     ),
                     "open": np.asarray([100.0, 100.0, 100.0], dtype=np.float32),
-                    "high": np.asarray([106.0, 100.0, 106.0], dtype=np.float32),
-                    "low": np.asarray([99.0, 94.0, 100.0], dtype=np.float32),
-                    "close": np.asarray([105.0, 95.0, 105.0], dtype=np.float32),
+                    "high": np.asarray([100.0, 106.0, 100.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 100.0, 94.0], dtype=np.float32),
+                    "close": np.asarray([100.0, 105.0, 95.0], dtype=np.float32),
                     "volume": np.asarray([1.0, 1.0, 1.0], dtype=np.float32),
                 }
             }
@@ -457,12 +458,18 @@ def test_compute_paper_trading_metrics_exposes_cost_drag_when_gross_edge_is_posi
         market_data_store=_FakeMarketDataStore(
             {
                 0: {
-                    "timestamp": np.asarray([np.datetime64("2024-01-01T00:00:00"), np.datetime64("2024-01-02T00:00:00")]),
-                    "open": np.asarray([100.0, 100.0], dtype=np.float32),
-                    "high": np.asarray([103.0, 103.0], dtype=np.float32),
-                    "low": np.asarray([100.0, 100.0], dtype=np.float32),
-                    "close": np.asarray([103.0, 103.0], dtype=np.float32),
-                    "volume": np.asarray([1.0, 1.0], dtype=np.float32),
+                    "timestamp": np.asarray(
+                        [
+                            np.datetime64("2024-01-01T00:00:00"),
+                            np.datetime64("2024-01-02T00:00:00"),
+                            np.datetime64("2024-01-03T00:00:00"),
+                        ]
+                    ),
+                    "open": np.asarray([100.0, 100.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([100.0, 103.0, 103.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 100.0, 100.0], dtype=np.float32),
+                    "close": np.asarray([100.0, 103.0, 103.0], dtype=np.float32),
+                    "volume": np.asarray([1.0, 1.0, 1.0], dtype=np.float32),
                 }
             }
         ),
@@ -497,12 +504,18 @@ def test_compute_paper_trading_metrics_counts_acted_on_exit_truth() -> None:
         market_data_store=_FakeMarketDataStore(
             {
                 0: {
-                    "timestamp": np.asarray([np.datetime64("2024-01-01T00:00:00"), np.datetime64("2024-01-02T00:00:00")]),
-                    "open": np.asarray([100.0, 100.0], dtype=np.float32),
-                    "high": np.asarray([105.0, 105.0], dtype=np.float32),
-                    "low": np.asarray([100.0, 100.0], dtype=np.float32),
-                    "close": np.asarray([105.0, 105.0], dtype=np.float32),
-                    "volume": np.asarray([1.0, 1.0], dtype=np.float32),
+                    "timestamp": np.asarray(
+                        [
+                            np.datetime64("2024-01-01T00:00:00"),
+                            np.datetime64("2024-01-02T00:00:00"),
+                            np.datetime64("2024-01-03T00:00:00"),
+                        ]
+                    ),
+                    "open": np.asarray([100.0, 100.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([100.0, 105.0, 105.0], dtype=np.float32),
+                    "low": np.asarray([100.0, 100.0, 100.0], dtype=np.float32),
+                    "close": np.asarray([100.0, 105.0, 105.0], dtype=np.float32),
+                    "volume": np.asarray([1.0, 1.0, 1.0], dtype=np.float32),
                 }
             }
         ),

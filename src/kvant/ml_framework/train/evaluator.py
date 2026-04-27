@@ -18,12 +18,14 @@ from kvant.ml_prepare_data.data_loading import PreparedStore
 from .backtest import BacktestTradeSimulator, compute_paper_trading_metrics
 from .classification_metrics import classification_metrics
 from .decision_policy import (
+    DEFAULT_META_FEATURES,
     LogisticMetaLabeler,
     meta_targets_from_predictions,
     normalize_meta_features,
     sized_trade_decisions,
 )
 from .predict import predict
+from .portfolio_simulator import compute_portfolio_metrics
 from .trading_metrics import compute_action_profit_stats, compute_profit_curve_over_trades
 
 
@@ -32,7 +34,12 @@ class EvalConfig:
     compute_per_ticker_accuracy: bool = True
     compute_profit_stats: bool = True
     compute_paper_trading_metrics: bool = True
+    compute_portfolio_metrics: bool = True
     initial_portfolio: float = 1.0
+    portfolio_initial_cash: float = 10_000.0
+    portfolio_max_position_fraction: float = 0.05
+    portfolio_max_total_exposure: float = 1.0
+    portfolio_max_positions: int = 10
     transaction_cost: float = 0.001
     risk_free_rate: float = 0.0314
     days_per_year: float = 365.0
@@ -40,7 +47,7 @@ class EvalConfig:
     backtest_barrier_height: float = 0.0
     labels: tuple[int, ...] = (0, 1)
     meta_model: str = "logreg"
-    meta_features: tuple[str, ...] = ("proba", "embedding")
+    meta_features: tuple[str, ...] = DEFAULT_META_FEATURES
     meta_random_state: int = 1337
     meta_accept_threshold: float = 0.5
     kelly_fraction: float = 1.0
@@ -73,6 +80,14 @@ class ExperimentEvaluator:
             raise RuntimeError("kelly_fraction must be non-negative.")
         if float(self.cfg.kelly_payoff_ratio) <= 0.0:
             raise RuntimeError("kelly_payoff_ratio must be positive.")
+        if float(self.cfg.portfolio_initial_cash) <= 0.0:
+            raise RuntimeError("portfolio_initial_cash must be positive.")
+        if not (0.0 < float(self.cfg.portfolio_max_position_fraction) <= 1.0):
+            raise RuntimeError("portfolio_max_position_fraction must be in (0, 1].")
+        if float(self.cfg.portfolio_max_total_exposure) <= 0.0:
+            raise RuntimeError("portfolio_max_total_exposure must be positive.")
+        if int(self.cfg.portfolio_max_positions) <= 0:
+            raise RuntimeError("portfolio_max_positions must be positive.")
         if self.cfg.compute_paper_trading_metrics:
             if int(self.cfg.backtest_width_minutes) <= 0:
                 raise RuntimeError("Paper trading metrics require a positive backtest_width_minutes setting.")
@@ -216,6 +231,7 @@ class ExperimentEvaluator:
 
         per_tid_profit: Dict[int, Dict[str, Any]] = {}
         profit_curve: Optional[Dict[str, Any]] = None
+        portfolio_curve: Optional[Dict[str, Any]] = None
         if self.cfg.compute_profit_stats:
             index = np.stack([tid, tpos], axis=1).astype(np.int32, copy=False)
             metas = self.store.metadata_for_index(index)
@@ -268,6 +284,38 @@ class ExperimentEvaluator:
                         "executed_trade_hit_rate_pct",
                     }:
                         metrics[f"{split}/execution/{suffix}"] = v
+            if self.cfg.compute_portfolio_metrics:
+                portfolio_result = compute_portfolio_metrics(
+                    y_true=event_true,
+                    y_pred=y_trade,
+                    tids=tid,
+                    tpos=tpos,
+                    bet_sizes=bet_size,
+                    simulator=self.paper_trade_simulator,
+                    initial_cash=float(self.cfg.portfolio_initial_cash),
+                    max_position_fraction=float(self.cfg.portfolio_max_position_fraction),
+                    max_total_exposure=float(self.cfg.portfolio_max_total_exposure),
+                    max_positions=int(self.cfg.portfolio_max_positions),
+                    risk_free_rate=float(self.cfg.risk_free_rate),
+                    days_per_year=float(self.cfg.days_per_year),
+                )
+                for k, v in portfolio_result.metrics.items():
+                    metrics[f"{split}/{k}"] = v
+                    suffix = str(k).split("/", 1)[1] if "/" in str(k) else str(k)
+                    if suffix in {
+                        "n_trade_signals_raw",
+                        "n_candidate_trades",
+                        "n_executed_trades",
+                        "n_skipped_overlap",
+                        "n_skipped_budget",
+                        "max_concurrent_positions",
+                    }:
+                        metrics[f"{split}/execution/portfolio_{suffix}"] = v
+                portfolio_curve = {
+                    "split": split,
+                    "epoch": int(step) if step is not None else None,
+                    **portfolio_result.equity_curve,
+                }
 
         if self.cfg.compute_per_ticker_accuracy:
             for t in np.unique(tid):
@@ -296,6 +344,8 @@ class ExperimentEvaluator:
                     }
                 )
 
+        if portfolio_curve is not None:
+            metrics["_portfolio_curve"] = portfolio_curve
         return metrics, per_ticker_rows, cm, profit_curve
 
     def evaluate_split(
@@ -332,19 +382,24 @@ class ExperimentEvaluator:
         all_metrics: Dict[str, Any] = {}
         confusion_counts: Dict[str, np.ndarray] = {}
         profit_curves: List[Dict[str, Any]] = []
+        portfolio_curves: List[Dict[str, Any]] = []
         rows_out: List[Dict[str, Any]] = []
 
         for split, pred_out in pred_out_by_split.items():
             take_proba = meta_model.predict_take_proba(pred_out=pred_out, store=self.store)
             metrics, rows, cm, profit_curve = self._evaluate_pred_out(split, pred_out, step=step, take_proba=take_proba)
+            portfolio_curve = metrics.pop("_portfolio_curve", None)
             all_metrics.update(metrics)
             rows_out.extend(rows)
             confusion_counts[split] = cm
             if profit_curve is not None:
                 profit_curves.append(profit_curve)
+            if portfolio_curve is not None:
+                portfolio_curves.append(portfolio_curve)
 
         all_metrics["_per_ticker_rows"] = rows_out
         all_metrics["_confusion_counts"] = confusion_counts
         all_metrics["_profit_curves"] = profit_curves
+        all_metrics["_portfolio_curves"] = portfolio_curves
         all_metrics["_confusion_class_names"] = ["Down barrier hit (y=0)", "Up barrier hit (y=1)"]
         return all_metrics

@@ -1,4 +1,5 @@
 # prepare_experiment.py
+import argparse
 from kvant.ml_prepare_data.features.feature_engineering import (
     IntradayTA10Features,
     StandardizedFeatures,
@@ -24,7 +25,7 @@ from kvant.labels import (
 from kvant.ml_prepare_data.labelling.tripple_bar import Labeler, TripleBarrierLabeler
 from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
 from kvant.ml_prepare_data.reporting import report_sampling_density, report_sampling_timeline
-from kvant.ml_prepare_data.samplers.sampler_cumsum import TunedCUSUMBarSampler
+from kvant.ml_prepare_data.samplers.sampler_cumsum import FixedThresholdCUSUMBarSampler, TunedCUSUMBarSampler
 from typing import Dict, Optional, List
 from kvant.kdata.hf_minute_data import (
     get_ticker_data,
@@ -214,6 +215,77 @@ def _in_split(tt, split: str, val_start, test_start) -> bool:
         if test_start is None:
             return False
         return tt >= test_start
+
+    raise ValueError(split)
+
+
+def _labeler_embargo_delta(labeler: Labeler) -> np.timedelta64:
+    width_minutes = getattr(labeler, "width_minutes", 0)
+    try:
+        width_minutes = max(int(width_minutes), 0)
+    except (TypeError, ValueError):
+        width_minutes = 0
+    return np.timedelta64(width_minutes, "m")
+
+
+def _label_interval_from_metadata(
+    metadata: Optional[dict],
+    fallback_signal_ts,
+) -> Optional[tuple[np.datetime64, np.datetime64]]:
+    if not isinstance(metadata, dict):
+        return None
+
+    signal_ts = metadata.get("signal_time", fallback_signal_ts)
+    close_ts = metadata.get("bar_close_time")
+    if signal_ts is None or close_ts is None:
+        return None
+
+    try:
+        signal_dt = _as_dt64_utc_naive(signal_ts)
+        close_dt = _as_dt64_utc_naive(close_ts)
+    except Exception:
+        return None
+
+    if close_dt < signal_dt:
+        return None
+    return signal_dt, close_dt
+
+
+def _label_interval_is_safe_for_split(
+    signal_ts,
+    close_ts,
+    split: str,
+    val_start,
+    test_start,
+    embargo: np.timedelta64 = np.timedelta64(0, "ns"),
+) -> bool:
+    signal_ts = _as_dt64_utc_naive(signal_ts)
+    close_ts = _as_dt64_utc_naive(close_ts)
+    val_start = _as_dt64_utc_naive(val_start) if val_start is not None else None
+    test_start = _as_dt64_utc_naive(test_start) if test_start is not None else None
+
+    if close_ts < signal_ts:
+        return False
+
+    if split == "train":
+        cut = val_start if val_start is not None else test_start
+        if cut is None:
+            return True
+        return bool(signal_ts < (cut - embargo) and close_ts < cut)
+
+    if split == "val":
+        if val_start is None:
+            return False
+        if signal_ts < val_start:
+            return False
+        if test_start is None:
+            return True
+        return bool(signal_ts < (test_start - embargo) and close_ts < test_start)
+
+    if split == "test":
+        if test_start is None:
+            return False
+        return bool(signal_ts >= test_start)
 
     raise ValueError(split)
 
@@ -509,6 +581,8 @@ def prepare_experiment(
     # Process each ticker on full history (train+val+test)
     # --------------------------------------------------------
     valid_pos_by_ticker: Dict[str, np.ndarray] = {}
+    label_metadata_by_ticker: Dict[str, list[Optional[dict]]] = {}
+    label_interval_embargo = _labeler_embargo_delta(labeler)
 
     # global diagnostics accumulator
     density_summary_rows: list[dict] = []
@@ -557,6 +631,7 @@ def prepare_experiment(
 
         X = feat_df_sampled.to_numpy(dtype=np.float32, copy=False)
         y, y_meta = labeler.transform(df1)
+        label_metadata_by_ticker[t] = y_meta
 
         if len(X) != len(y):
             raise RuntimeError(f"Length mismatch for {t}: features={len(X)} labels={len(y)}")
@@ -575,18 +650,35 @@ def prepare_experiment(
         y_counts_all_by_split = _label_counts_by_split(y, ts, val_start, test_start, only_valid_positions=None)
         y_counts_valid_by_split = _label_counts_by_split(y, ts, val_start, test_start, only_valid_positions=valid_pos)
 
-        # simple per-split valid target counts (sanity/debug)
-        n_valid_train = 0
-        n_valid_val = 0
-        n_valid_test = 0
+        # Split-valid target counts after purging label intervals that cross
+        # chronological boundaries and embargoing the period before the next split.
+        split_safe_counts = {"train": 0, "val": 0, "test": 0}
+        split_purged_counts = {"train": 0, "val": 0, "test": 0}
         for p in valid_pos:
-            tt = ts[int(p)]
+            p = int(p)
+            tt = ts[p]
+            raw_split = None
             if _in_split(tt, "train", val_start, test_start):
-                n_valid_train += 1
+                raw_split = "train"
             elif _in_split(tt, "val", val_start, test_start):
-                n_valid_val += 1
+                raw_split = "val"
             elif _in_split(tt, "test", val_start, test_start):
-                n_valid_test += 1
+                raw_split = "test"
+
+            interval = _label_interval_from_metadata(y_meta[p], tt)
+            if interval is not None and raw_split is not None:
+                signal_ts, close_ts = interval
+                if _label_interval_is_safe_for_split(
+                    signal_ts,
+                    close_ts,
+                    raw_split,
+                    val_start,
+                    test_start,
+                    embargo=label_interval_embargo,
+                ):
+                    split_safe_counts[raw_split] += 1
+                else:
+                    split_purged_counts[raw_split] += 1
 
         # Membership of ticker in the provided split dicts (not time membership).
         membership = []
@@ -654,13 +746,15 @@ def prepare_experiment(
             "label_counts_valid_targets": y_counts_valid,
             "label_counts_all_by_split": y_counts_all_by_split,
             "label_counts_valid_targets_by_split": y_counts_valid_by_split,
+            "label_interval_embargo_minutes": int(label_interval_embargo / np.timedelta64(1, "m")),
+            "label_interval_purged_valid_targets_by_split": split_purged_counts,
             # existing info
             "n_valid_targets_full": int(len(valid_pos)),
             "val_start_ts": None if val_start is None else str(pd.Timestamp(val_start, tz="UTC")),
             "test_start_ts": None if test_start is None else str(pd.Timestamp(test_start, tz="UTC")),
-            "n_valid_train": int(n_valid_train),
-            "n_valid_val": int(n_valid_val),
-            "n_valid_test": int(n_valid_test),
+            "n_valid_train": int(split_safe_counts["train"]),
+            "n_valid_val": int(split_safe_counts["val"]),
+            "n_valid_test": int(split_safe_counts["test"]),
         }
 
         market_data = df1.loc[:, list(MARKET_DATA_COLUMNS)].to_numpy(dtype=np.float32, copy=True)
@@ -677,13 +771,25 @@ def prepare_experiment(
         for t in tqdm.tqdm(tickers, desc=f"Building {split} index", dynamic_ncols=True):
             ts = np.load(tickers_root / t / "timestamps.npy", mmap_mode="r")
             valid_pos = valid_pos_by_ticker[t]
+            label_metadata = label_metadata_by_ticker[t]
             tid = ticker_id[t]
             val_start, test_start = boundaries[t]
 
             for p in valid_pos:
                 p = int(p)
                 tt = ts[p]
-                if _in_split(tt, split, val_start, test_start):
+                interval = _label_interval_from_metadata(label_metadata[p], tt)
+                if interval is None:
+                    continue
+                signal_ts, close_ts = interval
+                if _label_interval_is_safe_for_split(
+                    signal_ts,
+                    close_ts,
+                    split,
+                    val_start,
+                    test_start,
+                    embargo=label_interval_embargo,
+                ):
                     out.append((tid, p))
 
         return np.asarray(out, dtype=np.int32)
@@ -757,15 +863,28 @@ def prepare_single_dataset(
 # 6) Minimal runnable main (plug in your data loader)
 # ============================================================
 def main():
+    parser = argparse.ArgumentParser(description="Prepare walk-forward kvant experiment artifacts.")
+    parser.add_argument("--sampler", choices=("tuned_cusum", "fixed_cusum"), default="tuned_cusum")
+    parser.add_argument("--target-bars-per-day", type=float, default=30.0)
+    parser.add_argument("--cusum-h", type=float, default=0.01)
+    parser.add_argument("--lookback", type=int, default=12)
+    parser.add_argument("--barrier-width", type=int, default=180)
+    parser.add_argument("--barrier-height-pct", type=float, default=1.5)
+    args = parser.parse_args()
+
     downloaded_splits = get_huggingface_top_20_normal_splits()
 
-    TBPD = 30
-    L, width, height_pct = 12, 180, 1.5
+    TBPD = float(args.target_bars_per_day)
+    L, width, height_pct = int(args.lookback), int(args.barrier_width), float(args.barrier_height_pct)
     # Keep raw triple-barrier event labels by default; the training pipeline now
     # derives primary-side targets downstream and expects 3-class prepared artifacts.
     drop_time_exit_label = False
     label_suffix = "_droptexit" if drop_time_exit_label else ""
-    label = f"sb_L_{L}_w{width}_h{height_pct}_TBPD{TBPD}{label_suffix}"
+    if args.sampler == "fixed_cusum":
+        sampler_tag = f"fixedCUSUM{float(args.cusum_h):g}"
+    else:
+        sampler_tag = f"TBPD{TBPD:g}"
+    label = f"sb_L_{L}_w{width}_h{height_pct:g}_{sampler_tag}{label_suffix}"
     print(f"Writing to {label=}")
 
     from kvant.ml_prepare_data import prepared_data_root
@@ -776,7 +895,10 @@ def main():
         print(f"\nPreparing fold {fold_idx + 1}/{len(downloaded_splits)}")
         ticker_data_train, ticker_data_val, ticker_data_test = get_ticker_data(split)
 
-        sampler = TunedCUSUMBarSampler(target_bars_per_day=TBPD, aggregate_ohlcv=True)
+        if args.sampler == "fixed_cusum":
+            sampler = FixedThresholdCUSUMBarSampler(h=float(args.cusum_h), aggregate_ohlcv=True)
+        else:
+            sampler = TunedCUSUMBarSampler(target_bars_per_day=TBPD, aggregate_ohlcv=True)
         base_fe = IntradayTA10Features(
             volume_output="log1p",
             include_time_features=True,

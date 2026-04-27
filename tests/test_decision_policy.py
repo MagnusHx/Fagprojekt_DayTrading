@@ -27,7 +27,19 @@ def _write_ticker_fixture(exp_dir, ticker: str, *, labels: list[int], pnl: list[
     )
     if pnl is None:
         pnl = [(-0.05 if y == 0 else (0.05 if y == 2 else 0.0)) for y in labels]
-    label_meta = [{"label": int(y), "pnl_fraction": float(p)} for y, p in zip(labels, pnl)]
+    label_meta = []
+    for idx, (y, p) in enumerate(zip(labels, pnl)):
+        signal_time = np.datetime_as_string(timestamps[idx], unit="s")
+        close_time = np.datetime_as_string(timestamps[idx] + np.timedelta64(30, "s"), unit="s")
+        label_meta.append(
+            {
+                "label": int(y),
+                "signal_time": signal_time,
+                "bar_open_time": signal_time,
+                "bar_close_time": close_time,
+                "pnl_fraction": float(p),
+            }
+        )
     np.save(tdir / "features.npy", features)
     np.save(tdir / "labels.npy", np.asarray(labels, dtype=np.int64))
     np.save(tdir / "timestamps.npy", timestamps)
@@ -150,6 +162,16 @@ class _FakeStore:
     def prepared_last_feature_values(self, tids, tpos, feature_name: str) -> np.ndarray:
         return np.asarray([float(int(pos) + 1) for pos in tpos], dtype=np.float32)
 
+    def time_since_last_event_minutes(self, tids, tpos) -> np.ndarray:
+        return np.asarray([0.0 if int(pos) <= 0 else 1440.0 for pos in tpos], dtype=np.float64)
+
+    def ticker_rolling_trade_stats(self, *, tids, tpos, trade_labels, window: int):
+        return {
+            "rolling_win_rate": np.full(len(tids), 0.5, dtype=np.float64),
+            "directional_win_rate": np.full(len(tids), 0.5, dtype=np.float64),
+            "recent_net_return": np.zeros(len(tids), dtype=np.float64),
+        }
+
 
 def test_logistic_meta_labeler_builds_configurable_feature_matrix(tmp_path) -> None:
     exp = _write_prepared_fixture(tmp_path, feature_names=["f0", "f1", "f2"])
@@ -167,6 +189,30 @@ def test_logistic_meta_labeler_builds_configurable_feature_matrix(tmp_path) -> N
 
     assert X.shape == (2, 7)
     np.testing.assert_allclose(X[:, -1], np.asarray([4.0, 7.0], dtype=np.float64))
+
+
+def test_logistic_meta_labeler_builds_enriched_default_feature_matrix(tmp_path) -> None:
+    exp = _write_prepared_fixture(tmp_path, feature_names=["ewmstd_close_20b", "logret_1", "f2"])
+    pred_out = {
+        "tid": np.asarray([0, 0], dtype=np.int64),
+        "tpos": np.asarray([2, 3], dtype=np.int64),
+        "y_pred": np.asarray([1, 0], dtype=np.int64),
+        "y_pred_proba": np.asarray([[0.2, 0.8], [0.55, 0.45]], dtype=np.float64),
+        "y_logits": np.asarray([[0.0, 2.0], [0.2, 0.1]], dtype=np.float64),
+        "y_embedding": np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64),
+    }
+    policy = LogisticMetaLabeler()
+
+    X = policy.build_feature_matrix(pred_out=pred_out, store=exp.store)
+
+    assert X.shape == (2, 12)
+    np.testing.assert_allclose(X[:, 4], np.asarray([3.0, 6.0], dtype=np.float64))
+    np.testing.assert_allclose(X[:, 5], np.asarray([4.0, 7.0], dtype=np.float64))
+    np.testing.assert_allclose(X[:, 6], np.asarray([0.0, 1.0 / 3.0], dtype=np.float64))
+    np.testing.assert_allclose(X[:, 7], np.asarray([0.0, 1.0 / 3.0], dtype=np.float64))
+    np.testing.assert_allclose(X[:, 8], np.asarray([-0.025, 0.0], dtype=np.float64))
+    np.testing.assert_allclose(X[:, 9], np.asarray([0.6, 0.1], dtype=np.float64))
+    np.testing.assert_allclose(X[:, 11], np.asarray([1.0, 1.0], dtype=np.float64))
 
 
 def test_logistic_meta_labeler_requires_persisted_feature_names(tmp_path) -> None:

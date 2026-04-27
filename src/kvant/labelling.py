@@ -10,7 +10,9 @@ from kvant.labels import LABEL_DOWN, LABEL_EXIT, LABEL_UP
 
 @dataclasses.dataclass(frozen=True)
 class TripleBarLabel:
+    signal_time: pd.Timestamp
     bar_open_time: pd.Timestamp
+    entry_time: pd.Timestamp
     bar_close_time: pd.Timestamp
     label: int  # 0 = stop-loss (DOWN), 1 = vertical/time exit, 2 = take-profit (UP)
     pnl_fraction: float  # (exit - entry) / entry
@@ -31,7 +33,11 @@ def tripple_bar_label(
     height: float,
 ) -> Optional[TripleBarLabel]:
     """
-    Triple-barrier label for the bar at/after `time_start`.
+    Triple-barrier label for a signal at/after `time_start`.
+
+    The signal is observed on the sampled bar at/after `time_start`; execution is
+    modeled at the next sampled bar open. This avoids using the historical open of
+    an aggregated sampled bar whose timestamp marks the end of the segment.
 
     Parameters
     ----------
@@ -63,17 +69,23 @@ def tripple_bar_label(
     df = data
     ts0 = _to_utc_ts(time_start)
 
-    # Find the first bar at/after time_start
-    pos = df.index.searchsorted(ts0, side="left")
-    if pos >= len(df.index):
+    # Find the first sampled bar at/after time_start. The prediction is made here,
+    # so the earliest executable price is the next sampled bar's open.
+    signal_pos = df.index.searchsorted(ts0, side="left")
+    if signal_pos >= len(df.index):
         return None
 
-    entry_ts = df.index[pos]
+    entry_pos = int(signal_pos) + 1
+    if entry_pos >= len(df.index):
+        return None
+
+    signal_ts = df.index[signal_pos]
+    entry_ts = df.index[entry_pos]
 
     # Vertical barrier target and last available bar <= it
     end_target = entry_ts + pd.Timedelta(minutes=int(width))
     end_pos = df.index.searchsorted(end_target, side="right") - 1
-    if end_pos < pos:
+    if end_pos < entry_pos:
         return None
 
     exit_ts_vertical = df.index[end_pos]
@@ -82,7 +94,7 @@ def tripple_bar_label(
     if not nyse_trade_window_is_valid(entry_ts, exit_ts_vertical):
         return None
 
-    entry_price = float(df.iloc[pos]["open"])
+    entry_price = float(df.iloc[entry_pos]["open"])
     if not np.isfinite(entry_price) or entry_price <= 0:
         return None
 
@@ -90,7 +102,7 @@ def tripple_bar_label(
     upper = entry_price * (1.0 + h)
     lower = entry_price * (1.0 - h)
 
-    path = df.iloc[pos : end_pos + 1]
+    path = df.iloc[entry_pos : end_pos + 1]
 
     hit_up = path["high"] >= upper
     hit_dn = path["low"] <= lower
@@ -128,7 +140,9 @@ def tripple_bar_label(
     pnl_frac = float(pnl_abs / entry_price)
 
     return TripleBarLabel(
+        signal_time=signal_ts,
         bar_open_time=entry_ts,
+        entry_time=entry_ts,
         bar_close_time=exit_ts,
         label=int(label),
         pnl_fraction=pnl_frac,

@@ -17,8 +17,10 @@ class BacktestTrade:
     ticker: str
     signal_label: int
     true_label: Optional[int]
+    signal_tpos: int
     entry_tpos: int
     exit_tpos: int
+    signal_time: pd.Timestamp
     entry_time: pd.Timestamp
     exit_time: pd.Timestamp
     entry_price: float
@@ -104,10 +106,15 @@ class BacktestTradeSimulator:
         lows = np.asarray(market_data["low"], dtype=np.float64)
         closes = np.asarray(market_data["close"], dtype=np.float64)
 
-        entry_pos = int(tpos)
-        if entry_pos < 0 or entry_pos >= len(timestamps):
+        signal_pos = int(tpos)
+        if signal_pos < 0 or signal_pos >= len(timestamps):
             return None
 
+        entry_pos = signal_pos + 1
+        if entry_pos >= len(timestamps):
+            return None
+
+        signal_time = _to_utc_timestamp(timestamps[signal_pos])
         entry_time = _to_utc_timestamp(timestamps[entry_pos])
         entry_price = float(opens[entry_pos])
         if not np.isfinite(entry_price) or entry_price <= 0.0:
@@ -163,8 +170,10 @@ class BacktestTradeSimulator:
             ticker=self.market_data_store.ticker(tid),
             signal_label=int(signal_label),
             true_label=true_label,
+            signal_tpos=signal_pos,
             entry_tpos=entry_pos,
             exit_tpos=exit_pos,
+            signal_time=signal_time,
             entry_time=entry_time,
             exit_time=exit_time,
             entry_price=float(entry_price),

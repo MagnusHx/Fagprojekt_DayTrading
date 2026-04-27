@@ -221,6 +221,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-return-stats", action="store_true")
     p.add_argument("--pipeline-stage", type=str, choices=("primary_side",), default="primary_side")
     p.add_argument("--initial-portfolio", type=float, default=1.0)
+    p.add_argument("--portfolio-initial-cash", type=float, default=10_000.0)
+    p.add_argument("--portfolio-max-position-fraction", type=float, default=0.05)
+    p.add_argument("--portfolio-max-total-exposure", type=float, default=1.0)
+    p.add_argument("--portfolio-max-positions", type=int, default=10)
     p.add_argument("--transaction-cost", type=float, default=0.001)
     p.add_argument("--kelly-fraction", type=float, default=1.0)
     p.add_argument("--kelly-payoff-ratio", type=float, default=1.0)
@@ -237,7 +241,10 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=None,
         help="Repeatable or comma-separated meta-label feature tokens. "
-        "Supported: proba, logits, embedding, prepared_last:<feature_name>.",
+        "Supported: proba, logits, embedding, prediction_margin, prediction_entropy, "
+        "time_since_last_event, prepared_last:<feature_name>, ticker_rolling_win_rate_<N>, "
+        "ticker_directional_win_rate_<N>, ticker_recent_net_return_<N>. "
+        "Prepared aliases include prepared_last:volatility and prepared_last:recent_return.",
     )
     p.add_argument("--topk-ticker-plots", type=int, default=50)
     p.add_argument(
@@ -271,6 +278,14 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("--kelly-fraction must be non-negative.")
     if args.kelly_payoff_ratio <= 0.0:
         raise SystemExit("--kelly-payoff-ratio must be positive.")
+    if args.portfolio_initial_cash <= 0.0:
+        raise SystemExit("--portfolio-initial-cash must be positive.")
+    if not (0.0 < args.portfolio_max_position_fraction <= 1.0):
+        raise SystemExit("--portfolio-max-position-fraction must be in (0, 1].")
+    if args.portfolio_max_total_exposure <= 0.0:
+        raise SystemExit("--portfolio-max-total-exposure must be positive.")
+    if args.portfolio_max_positions <= 0:
+        raise SystemExit("--portfolio-max-positions must be positive.")
     if args.train_batch_size <= 0 or args.eval_batch_size <= 0 or args.epochs <= 0:
         raise SystemExit("epochs and batch sizes must be positive.")
     return args
@@ -331,6 +346,10 @@ def _save_best_checkpoint_bundle(
             "meta_random_state": int(args.seed),
             "meta_accept_threshold": float(args.meta_accept_threshold),
             "initial_portfolio": args.initial_portfolio,
+            "portfolio_initial_cash": float(args.portfolio_initial_cash),
+            "portfolio_max_position_fraction": float(args.portfolio_max_position_fraction),
+            "portfolio_max_total_exposure": float(args.portfolio_max_total_exposure),
+            "portfolio_max_positions": int(args.portfolio_max_positions),
             "transaction_cost": args.transaction_cost,
             "kelly_fraction": float(args.kelly_fraction),
             "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
@@ -540,11 +559,16 @@ def run_single_fold(
                 compute_per_ticker_accuracy=True,
                 compute_profit_stats=not args.no_return_stats,
                 compute_paper_trading_metrics=not args.no_return_stats,
+                compute_portfolio_metrics=not args.no_return_stats,
                 meta_model="logreg",
                 meta_features=args.meta_features,
                 meta_random_state=int(args.seed),
                 meta_accept_threshold=float(args.meta_accept_threshold),
                 initial_portfolio=args.initial_portfolio,
+                portfolio_initial_cash=float(args.portfolio_initial_cash),
+                portfolio_max_position_fraction=float(args.portfolio_max_position_fraction),
+                portfolio_max_total_exposure=float(args.portfolio_max_total_exposure),
+                portfolio_max_positions=int(args.portfolio_max_positions),
                 transaction_cost=args.transaction_cost,
                 kelly_fraction=float(args.kelly_fraction),
                 kelly_payoff_ratio=float(args.kelly_payoff_ratio),

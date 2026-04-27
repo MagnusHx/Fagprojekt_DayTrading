@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
 from kvant.labels import (
+    LABEL_UP,
     class_names_from_semantics,
     event_label_from_metadata,
     event_labels_to_side_labels,
@@ -33,6 +35,13 @@ def _load_jsonl(path: Path) -> List[Optional[dict]]:
                 continue
             out.append(json.loads(line))
     return out
+
+
+def _to_dt64_utc_naive(value: Any) -> np.datetime64:
+    ts = pd.Timestamp(value)
+    if ts.tz is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return np.datetime64(ts, "ns")
 
 
 class PreparedStore:
@@ -172,9 +181,29 @@ class PreparedStore:
 
     def feature_index(self, feature_name: str) -> int:
         self.require_feature_names()
+        feature_name = self.resolve_feature_name(feature_name)
         if feature_name not in self.feature_name_to_index:
             raise RuntimeError(f"Unknown prepared feature name {feature_name!r}.")
         return int(self.feature_name_to_index[feature_name])
+
+    def resolve_feature_name(self, feature_name: str) -> str:
+        self.require_feature_names()
+        aliases = {
+            "volatility": ("ewmstd_close_20b", "ewmstd_close_10b", "ewmstd_close_15b", "ewmstd_close_50b", "bb_width"),
+            "volatility_feature": ("ewmstd_close_20b", "ewmstd_close_10b", "ewmstd_close_15b", "ewmstd_close_50b", "bb_width"),
+            "recent_return": ("logret_1",),
+            "recent_return_feature": ("logret_1",),
+        }
+        key = str(feature_name).strip()
+        for candidate in aliases.get(key, (key,)):
+            if candidate in self.feature_name_to_index:
+                return candidate
+        if key in aliases:
+            raise RuntimeError(
+                f"Prepared feature alias {key!r} could not be resolved. "
+                f"Tried {list(aliases[key])}; available features are {list(self.feature_names or ())}."
+            )
+        return key
 
     def prepared_last_feature_values(self, tids: np.ndarray, tpos: np.ndarray, feature_name: str) -> np.ndarray:
         feature_idx = self.feature_index(feature_name)
@@ -187,6 +216,83 @@ class PreparedStore:
                 )
             out[i] = float(self._features[int(tid)][row_idx, feature_idx])
         return out
+
+    def time_since_last_event_minutes(self, tids: np.ndarray, tpos: np.ndarray) -> np.ndarray:
+        out = np.zeros(len(tids), dtype=np.float64)
+        for i, (tid, pos) in enumerate(zip(tids, tpos)):
+            tid = int(tid)
+            pos = int(pos)
+            if pos <= 0:
+                out[i] = 0.0
+                continue
+            current_ts = _to_dt64_utc_naive(self._timestamps[tid][pos])
+            previous_ts = _to_dt64_utc_naive(self._timestamps[tid][pos - 1])
+            delta = (current_ts - previous_ts) / np.timedelta64(1, "m")
+            out[i] = float(max(delta, 0.0))
+        return out
+
+    def ticker_rolling_trade_stats(
+        self,
+        *,
+        tids: np.ndarray,
+        tpos: np.ndarray,
+        trade_labels: np.ndarray,
+        window: int,
+    ) -> dict[str, np.ndarray]:
+        window = int(window)
+        if window <= 0:
+            raise ValueError("window must be positive.")
+
+        rolling_win_rate = np.full(len(tids), 0.5, dtype=np.float64)
+        directional_win_rate = np.full(len(tids), 0.5, dtype=np.float64)
+        recent_net_return = np.zeros(len(tids), dtype=np.float64)
+
+        for i, (tid_raw, pos_raw, trade_label_raw) in enumerate(zip(tids, tpos, trade_labels)):
+            tid = int(tid_raw)
+            pos = int(pos_raw)
+            trade_label = int(trade_label_raw)
+            current_meta = self.metadata(tid, pos)
+            signal_ts = (
+                _to_dt64_utc_naive(current_meta.get("signal_time"))
+                if isinstance(current_meta, dict) and current_meta.get("signal_time") is not None
+                else _to_dt64_utc_naive(self._timestamps[tid][pos])
+            )
+
+            long_returns: list[float] = []
+            side_returns: list[float] = []
+            for previous_pos in range(pos - 1, -1, -1):
+                previous_meta = self.metadata(tid, previous_pos)
+                if not isinstance(previous_meta, dict):
+                    continue
+                close_time = previous_meta.get("bar_close_time")
+                pnl_fraction = previous_meta.get("pnl_fraction")
+                if close_time is None or pnl_fraction is None:
+                    continue
+                try:
+                    close_ts = _to_dt64_utc_naive(close_time)
+                    pnl = float(pnl_fraction)
+                except Exception:
+                    continue
+                if close_ts >= signal_ts:
+                    continue
+
+                long_returns.append(pnl)
+                side_returns.append(pnl if trade_label == LABEL_UP else -pnl)
+                if len(side_returns) >= window:
+                    break
+
+            if long_returns:
+                long_arr = np.asarray(long_returns, dtype=np.float64)
+                side_arr = np.asarray(side_returns, dtype=np.float64)
+                rolling_win_rate[i] = float(np.mean(long_arr > 0.0))
+                directional_win_rate[i] = float(np.mean(side_arr > 0.0))
+                recent_net_return[i] = float(np.mean(side_arr))
+
+        return {
+            "rolling_win_rate": rolling_win_rate,
+            "directional_win_rate": directional_win_rate,
+            "recent_net_return": recent_net_return,
+        }
 
 
 class IndexWindowDataset(Dataset):

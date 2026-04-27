@@ -1,0 +1,23 @@
+# Team Change Log
+
+Last updated: 2026-04-27
+
+Purpose: explain project changes in language that another team member can read quickly. This is not a replacement for git history; it is the project story.
+
+| Date | Team member | Change type | Summary | Why it mattered | Verification | Related files |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-04-27 | Codex | Methodology fix | Changed Triple Barrier labeling and paper backtest to enter on the next sampled bar after the signal. | Prevents trades from entering at the historical open of an aggregated CUSUM bar. | `uv run ruff check .`; `uv run pytest` passed. | `src/kvant/labelling.py`; `src/kvant/ml_framework/train/backtest.py`; `tests/test_labelling.py`; `tests/test_trading_metrics.py` |
+| 2026-04-27 | Codex | Leakage fix | Updated split index construction to purge label intervals that cross train/validation/test boundaries and embargo events before the next boundary. | Reduces leakage from Triple Barrier labels whose outcomes are determined by future split prices. | `uv run ruff check .`; `uv run pytest` passed. | `src/kvant/ml_prepare_data/prepare_experiment.py`; `tests/test_data.py` |
+| 2026-04-27 | Codex | Documentation | Created a reference implementation matrix and this working-method logbook. | Gives the team a shared place to track reference methods, implementation status, tests, AI usage, and readable changes. | Markdown files created and reviewed for consistency with current code. | `reports/reference_implementation_matrix.md`; `docs/team_working_method_and_logbook.md` |
+| 2026-04-27 | Codex | Method implementation | Added a fixed-threshold CUSUM sampler and preparation CLI option. | Makes the project closer to the reference paper's CUSUM threshold sweeps while preserving the tuned sampler baseline. | `uv run ruff check ...`; focused `uv run pytest ...` passed. | `src/kvant/ml_prepare_data/samplers/sampler_cumsum.py`; `src/kvant/ml_prepare_data/prepare_experiment.py`; `tests/test_samplers.py`; `README.md`; `reports/reference_implementation_matrix.md` |
+| 2026-04-27 | Codex | Model selection improvement | Enriched the default meta-label feature set with prediction uncertainty, prepared volatility/return aliases, rolling ticker win/return stats, and time since last event. | Gives the meta model more live-safe context for deciding whether to trade, especially after the fixed-CUSUM run showed too many acted trades on `EXIT` events. | `uv run ruff check .`; `uv run pytest` passed. | `src/kvant/ml_framework/train/decision_policy.py`; `src/kvant/ml_prepare_data/data_loading.py`; `src/kvant/ml_framework/train/evaluator.py`; `src/kvant/ml_framework/scripts/train_experiment.py`; `tests/test_decision_policy.py` |
+| 2026-04-27 | Codex | Portfolio simulation | Added a budget-constrained portfolio simulator with cash, open positions, exposure limits, transaction costs, equity curve logging, and `portfolio/*` metrics. | Makes final economic evaluation more realistic than trade-exit compounding because concurrent positions now share one budget. | `uv run ruff check .`; `uv run pytest` passed. | `src/kvant/ml_framework/train/portfolio_simulator.py`; `src/kvant/ml_framework/train/evaluator.py`; `src/kvant/ml_framework/logging/wandb_logger.py`; `tests/test_portfolio_simulator.py`; `README.md` |
+| 2026-04-27 | Codex | Documentation and logging | Updated project descriptions, W&B metric inventory, method notes, AI log, and regenerated `Kvant_Project_Description.docx` around the current portfolio-first evaluation approach. | Keeps the team-facing documents aligned with the implemented pipeline and makes the Word project description readable for review. | `.docx` read-back with `python-docx`; `uv run ruff check .`; `uv run pytest` passed. | `README.md`; `docs/README.md`; `docs/source/index.md`; `docs/team_method.md`; `docs/ai_dialog_log.md`; `reports/Kvant_Project_Description.docx`; `src/kvant/ml_framework/train/metric_registry.py` |
+
+## Entry Template
+
+Copy this row when adding a new project change:
+
+| Date | Team member | Change type | Summary | Why it mattered | Verification | Related files |
+| --- | --- | --- | --- | --- | --- | --- |
+| YYYY-MM-DD | Name | Code / experiment / docs / analysis | What changed? | Why should the team care? | Commands, result link, or reason not tested | Paths |

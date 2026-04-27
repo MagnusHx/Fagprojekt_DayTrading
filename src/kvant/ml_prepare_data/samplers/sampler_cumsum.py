@@ -161,3 +161,54 @@ class TunedCUSUMBarSampler(BaseBarSampler):
             return df.iloc[ends].copy()
 
         return _aggregate_ohlcv_segments(df, ends)
+
+
+@dataclass
+class FixedThresholdCUSUMBarSampler(BaseBarSampler):
+    """
+    Fixed-threshold CUSUM sampler for reference-faithful ablations.
+
+    Unlike ``TunedCUSUMBarSampler``, this sampler does not tune ``h`` per ticker
+    to hit a target sample density. Every ticker uses the same fractional return
+    threshold, which makes threshold sweeps such as 1%, 2%, and 3% directly
+    comparable to the reference-method setup.
+    """
+
+    name: str = "cusum_fixed"
+    h: float = 0.01
+    price_col: str = "close"
+    aggregate_ohlcv: bool = True
+
+    def __post_init__(self) -> None:
+        if float(self.h) <= 0.0:
+            raise ValueError("FixedThresholdCUSUMBarSampler.h must be positive.")
+
+    def fit(self, ticker_dfs_train: Dict[str, pd.DataFrame]) -> "FixedThresholdCUSUMBarSampler":
+        return self
+
+    def get_global_meta(self) -> dict:
+        return {
+            "name": self.name,
+            "h": float(self.h),
+            "price_col": self.price_col,
+            "aggregate_ohlcv": bool(self.aggregate_ohlcv),
+            "tuning": "fixed_threshold",
+        }
+
+    def get_ticker_meta(self, ticker: str) -> dict:
+        return {"h": float(self.h), "tuned": False}
+
+    def transform(self, df: pd.DataFrame, *, ticker: str) -> pd.DataFrame:
+        df = ensure_utc_sorted_index(df)
+        if len(df) == 0:
+            return df.copy()
+        if self.price_col not in df.columns:
+            raise KeyError(f"FixedThresholdCUSUMBarSampler expected price column {self.price_col!r}.")
+
+        close = df[self.price_col].to_numpy(dtype=np.float64)
+        ends = _cusum_event_ends(close, float(self.h))
+
+        if not self.aggregate_ohlcv:
+            return df.iloc[ends].copy()
+
+        return _aggregate_ohlcv_segments(df, ends)

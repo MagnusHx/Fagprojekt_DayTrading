@@ -58,6 +58,19 @@ class _FakeStore:
     def ticker(self, tid: int) -> str:
         return self.tickers_all[int(tid)]
 
+    def prepared_last_feature_values(self, tids, tpos, feature_name: str) -> np.ndarray:
+        return np.zeros(len(tids), dtype=np.float32)
+
+    def time_since_last_event_minutes(self, tids, tpos) -> np.ndarray:
+        return np.asarray([0.0 if int(pos) <= 0 else 1440.0 for pos in tpos], dtype=np.float64)
+
+    def ticker_rolling_trade_stats(self, *, tids, tpos, trade_labels, window: int):
+        return {
+            "rolling_win_rate": np.full(len(tids), 0.5, dtype=np.float64),
+            "directional_win_rate": np.full(len(tids), 0.5, dtype=np.float64),
+            "recent_net_return": np.zeros(len(tids), dtype=np.float64),
+        }
+
 
 def _market_data_from_times(times: list[str], *, opens: list[float], highs: list[float], lows: list[float], closes: list[float]):
     return {

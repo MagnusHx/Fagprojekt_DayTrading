@@ -324,6 +324,55 @@ def test_prepare_experiment_feature_selector_is_fit_on_train_only_and_rewrites_m
     assert saved_cfg["feature_selector"]["selected_feature_names"] == ["close_diff_prev_minute"]
 
 
+def test_label_interval_split_safety_purges_boundary_crossing_and_embargoes() -> None:
+    from kvant.ml_prepare_data.prepare_experiment import _label_interval_is_safe_for_split
+
+    val_start = np.datetime64("2024-01-02T10:00:00")
+    test_start = np.datetime64("2024-01-02T11:00:00")
+    embargo = np.timedelta64(15, "m")
+
+    assert not _label_interval_is_safe_for_split(
+        np.datetime64("2024-01-02T09:59:00"),
+        np.datetime64("2024-01-02T10:01:00"),
+        "train",
+        val_start,
+        test_start,
+        embargo,
+    )
+    assert not _label_interval_is_safe_for_split(
+        np.datetime64("2024-01-02T09:50:00"),
+        np.datetime64("2024-01-02T09:55:00"),
+        "train",
+        val_start,
+        test_start,
+        embargo,
+    )
+    assert _label_interval_is_safe_for_split(
+        np.datetime64("2024-01-02T09:40:00"),
+        np.datetime64("2024-01-02T09:45:00"),
+        "train",
+        val_start,
+        test_start,
+        embargo,
+    )
+    assert not _label_interval_is_safe_for_split(
+        np.datetime64("2024-01-02T10:55:00"),
+        np.datetime64("2024-01-02T10:58:00"),
+        "val",
+        val_start,
+        test_start,
+        embargo,
+    )
+    assert _label_interval_is_safe_for_split(
+        np.datetime64("2024-01-02T11:00:00"),
+        np.datetime64("2024-01-02T11:05:00"),
+        "test",
+        val_start,
+        test_start,
+        embargo,
+    )
+
+
 def test_validate_cv_manifest_accepts_pointer_txt(tmp_path) -> None:
     exp_dir = _write_prepared_fixture(tmp_path, binary=True, with_market_data=True)
     manifest_json = tmp_path / "manifest.json"

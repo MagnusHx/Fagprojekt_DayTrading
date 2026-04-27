@@ -12,7 +12,27 @@ from kvant.labels import LABEL_DOWN, LABEL_EXIT, LABEL_UP, META_LABEL_TAKE, side
 from kvant.ml_prepare_data.data_loading import PreparedStore
 
 
-DEFAULT_META_FEATURES = ("proba", "embedding")
+DEFAULT_META_FEATURES = (
+    "proba",
+    "embedding",
+    "prepared_last:volatility",
+    "prepared_last:recent_return",
+    "ticker_rolling_win_rate_50",
+    "ticker_directional_win_rate_50",
+    "ticker_recent_net_return_50",
+    "prediction_margin",
+    "prediction_entropy",
+    "time_since_last_event",
+)
+
+_DIRECT_META_FEATURES = {
+    "proba",
+    "logits",
+    "embedding",
+    "prediction_margin",
+    "prediction_entropy",
+    "time_since_last_event",
+}
 
 
 def normalize_meta_features(features: Sequence[str] | None) -> tuple[str, ...]:
@@ -33,16 +53,61 @@ def normalize_meta_features(features: Sequence[str] | None) -> tuple[str, ...]:
 def validate_meta_features(features: Iterable[str]) -> tuple[str, ...]:
     normalized = normalize_meta_features(tuple(features))
     for token in normalized:
-        if token in {"proba", "logits", "embedding"}:
+        if token in _DIRECT_META_FEATURES:
             continue
         if token.startswith("prepared_last:") and token.split(":", 1)[1].strip():
             continue
+        if _rolling_feature_kind_and_window(token) is not None:
+            continue
         raise ValueError(
             "meta_features entries must be one of "
-            "'proba', 'logits', 'embedding', or 'prepared_last:<feature_name>'. "
+            "'proba', 'logits', 'embedding', 'prediction_margin', "
+            "'prediction_entropy', 'time_since_last_event', "
+            "'prepared_last:<feature_name>', 'ticker_rolling_win_rate_<N>', "
+            "'ticker_directional_win_rate_<N>', or 'ticker_recent_net_return_<N>'. "
             f"Got {token!r}."
         )
     return normalized
+
+
+def _rolling_feature_kind_and_window(token: str) -> tuple[str, int] | None:
+    prefixes = {
+        "ticker_rolling_win_rate_": "rolling_win_rate",
+        "ticker_directional_win_rate_": "directional_win_rate",
+        "ticker_recent_net_return_": "recent_net_return",
+    }
+    for prefix, kind in prefixes.items():
+        if not token.startswith(prefix):
+            continue
+        try:
+            window = int(token.removeprefix(prefix))
+        except ValueError:
+            return None
+        if window <= 0:
+            return None
+        return kind, window
+    return None
+
+
+def _prediction_margin(proba: np.ndarray) -> np.ndarray:
+    proba = np.asarray(proba, dtype=np.float64)
+    if proba.ndim != 2 or proba.shape[1] == 0:
+        raise RuntimeError(f"Expected 2D probability matrix, got shape {tuple(proba.shape)}.")
+    if proba.shape[1] == 1:
+        return np.ones(proba.shape[0], dtype=np.float64)
+    sorted_proba = np.sort(proba, axis=1)
+    return np.asarray(sorted_proba[:, -1] - sorted_proba[:, -2], dtype=np.float64)
+
+
+def _prediction_entropy(proba: np.ndarray) -> np.ndarray:
+    proba = np.asarray(proba, dtype=np.float64)
+    if proba.ndim != 2 or proba.shape[1] == 0:
+        raise RuntimeError(f"Expected 2D probability matrix, got shape {tuple(proba.shape)}.")
+    clipped = np.clip(proba, 1e-12, 1.0)
+    entropy = -np.sum(clipped * np.log(clipped), axis=1)
+    if proba.shape[1] > 1:
+        entropy = entropy / np.log(float(proba.shape[1]))
+    return np.asarray(entropy, dtype=np.float64)
 
 
 def meta_targets_from_predictions(
@@ -164,16 +229,39 @@ class LogisticMetaLabeler:
         blocks: list[np.ndarray] = []
         tids = np.asarray(pred_out["tid"], dtype=np.int64)
         tpos = np.asarray(pred_out["tpos"], dtype=np.int64)
+        proba = np.asarray(pred_out["y_pred_proba"], dtype=np.float64)
+        proposed_trade_labels = side_labels_to_trade_labels(pred_out["y_pred"])
 
         for token in self.feature_tokens:
             if token == "proba":
-                blocks.append(np.asarray(pred_out["y_pred_proba"], dtype=np.float64))
+                blocks.append(proba)
                 continue
             if token == "logits":
                 blocks.append(np.asarray(pred_out["y_logits"], dtype=np.float64))
                 continue
             if token == "embedding":
                 blocks.append(np.asarray(pred_out["y_embedding"], dtype=np.float64))
+                continue
+            if token == "prediction_margin":
+                blocks.append(_prediction_margin(proba).reshape(-1, 1))
+                continue
+            if token == "prediction_entropy":
+                blocks.append(_prediction_entropy(proba).reshape(-1, 1))
+                continue
+            if token == "time_since_last_event":
+                values = store.time_since_last_event_minutes(tids=tids, tpos=tpos)
+                blocks.append(values.astype(np.float64, copy=False).reshape(-1, 1))
+                continue
+            rolling_feature = _rolling_feature_kind_and_window(token)
+            if rolling_feature is not None:
+                kind, window = rolling_feature
+                stats = store.ticker_rolling_trade_stats(
+                    tids=tids,
+                    tpos=tpos,
+                    trade_labels=proposed_trade_labels,
+                    window=window,
+                )
+                blocks.append(stats[kind].astype(np.float64, copy=False).reshape(-1, 1))
                 continue
             feature_name = token.split(":", 1)[1]
             values = store.prepared_last_feature_values(tids=tids, tpos=tpos, feature_name=feature_name)
