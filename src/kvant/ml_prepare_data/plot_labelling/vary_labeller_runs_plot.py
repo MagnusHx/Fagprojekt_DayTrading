@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,6 +16,8 @@ def _load_pkl(path: Path) -> dict[str, Any]:
 def _run_label(r: dict[str, Any]) -> str:
     p = r["params"]
     return f"w={p['width_minutes']}, h={p['height']}"
+
+
 def plot_per_ticker_split_counts(
     payload: dict[str, Any],
     *,

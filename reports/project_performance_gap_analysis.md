@@ -2,14 +2,14 @@
 
 ## Scope
 
-This memo compares the current repository against the paper in `s40854-025-00866-w.pdf` and ranks the most likely reasons the project is not producing stronger trading results.
+This memo compares the current repository against the paper in `references/s40854-025-00866-w.pdf` and ranks the most likely reasons the project is not producing stronger trading results.
 
 Evidence used:
 
-- Paper text from `../s40854-025-00866-w.pdf`
+- Paper text from `references/s40854-025-00866-w.pdf`
 - Project code under `src/kvant`
-- Prepared artifacts under `src/kvant/ml_framework/prepared`
-- Stored W&B runs under `wandb/`
+- Prepared-artifact summaries produced by earlier runs under `src/kvant/ml_framework/prepared`
+- Stored W&B summaries from earlier local runs
 
 The goal here is not blind replication. The goal is to identify which gaps are:
 
@@ -37,17 +37,17 @@ Inside the project’s own setup, the clearest weakness is the label/task design
 
 | Claim area | Source |
 | --- | --- |
-| Paper market, split, model-selection, and trading-rule claims | `../s40854-025-00866-w.pdf` |
+| Paper market, split, model-selection, and trading-rule claims | `references/s40854-025-00866-w.pdf` |
 | Equities data source and expanding-quarter split logic | `src/kvant/kdata/hf_minute_data.py` |
 | Current preparation settings | `src/kvant/ml_prepare_data/prepare_experiment.py` |
 | Current CUSUM sampler behavior | `src/kvant/ml_prepare_data/samplers/sampler_cumsum.py` and prepared `sampler_*meta.json` files |
 | Current model architecture | `src/kvant/ml_framework/models/conv1d.py` |
 | Current training policy | `src/kvant/ml_framework/train/trainer.py` |
 | Current optimizer and weighted loss setup | `src/kvant/ml_framework/scripts/train_experiment.py` and `src/kvant/ml_framework/train/utils.py` |
-| Main label-distribution evidence | prepared artifacts under `src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_foldXX` |
-| Current run-level economics | `wandb/run-20260408_223253-lxn4p1ym`, `wandb/run-20260418_170817-x71xflhg` |
-| Concrete high-accuracy but economically bad example | `../wandb/run-20260415_232318-6sbt4jie` |
-| Confusion-matrix evidence for the same example | `../wandb/run-20260415_232318-6sbt4jie/files/media/table/fold00/perf/confusion_matrix_normalized/test_12_3ae5f763b1004aef0820.table.json` |
+| Main label-distribution evidence | earlier prepared-artifact summaries for `sb_L_12_w180_h1.5_TBPD30_foldXX` |
+| Current run-level economics | earlier local W&B summaries |
+| Concrete high-accuracy but economically bad example | earlier W&B run `run-20260415_232318-6sbt4jie` |
+| Confusion-matrix evidence for the same example | earlier W&B confusion-matrix table for `test_12` |
 
 ## Paper vs Project Method Matrix
 
@@ -216,7 +216,7 @@ The stored runs make the disconnect very clear.
 
 ### Concrete failure example
 
-The outer run `../wandb/run-20260415_232318-6sbt4jie` provides a strong single-fold example:
+The earlier run `run-20260415_232318-6sbt4jie` provides a strong single-fold example:
 
 - `fold00/test/accuracy = 0.6887`
 - `fold00/test/f1_macro = 0.4949`

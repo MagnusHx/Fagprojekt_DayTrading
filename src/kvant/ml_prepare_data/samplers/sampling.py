@@ -1,7 +1,9 @@
 from dataclasses import dataclass
-from kvant.ml_prepare_data.dataset_preparation_utils import ensure_utc_sorted_index
-from typing import Dict, Optional, Protocol
+from typing import Dict
+
 import pandas as pd
+
+from kvant.ml_prepare_data.dataset_preparation_utils import ensure_utc_sorted_index
 
 # class BarSampler(Protocol):
 #     name: str

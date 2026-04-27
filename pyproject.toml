@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "kvant"
 version = "0.0.1"
-description = "Research project on automated day trading using short-term (1\u20135 min) stock data. Develops and evaluates a risk-aware, online trading algorithm that jointly optimizes filtering and trade-entry decisions for profit under transaction costs. Implemented and backtested in Python with vectorbt under realistic, non-stationary market conditions."
+description = "Quant research project for short-horizon US equity trading. The current pipeline prepares train-only fitted CUSUM-sampled triple-barrier event outcomes, trains a primary side model, adds a meta-label decision layer, and evaluates acted trades, abstentions, and transaction-cost-aware economics."
 authors = [
   { name = "group 1", email = "your@email.com" },
 ]

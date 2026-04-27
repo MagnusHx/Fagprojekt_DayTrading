@@ -183,17 +183,16 @@ def _auto_wandb_name(args: argparse.Namespace, *, run_cv: bool) -> str:
 def parse_args() -> argparse.Namespace:
     from kvant.ml_prepare_data import prepared_data_root
 
-    with open(prepared_data_root / "last_experiment.txt", "r") as f:
-        exp_id = f.read().strip()
-
-    from kvant.ml_prepare_data import prepared_data_root
-
-    default_exp_dir = _compatible_default_exp_dir(prepared_data_root / exp_id)
+    exp_ptr = prepared_data_root / "last_experiment.txt"
+    default_exp_dir = None
+    if exp_ptr.exists():
+        exp_id = exp_ptr.read_text().strip()
+        if exp_id:
+            default_exp_dir = _compatible_default_exp_dir(prepared_data_root / exp_id)
     default_cv_manifest = None
     cv_ptr = prepared_data_root / "last_experiment_cv_manifest.txt"
     if cv_ptr.exists():
         default_cv_manifest = _compatible_default_manifest(cv_ptr)
-    # default_exp_dir = Path("../src/kvant/ml_framework/prepared") / exp_id
 
     p = argparse.ArgumentParser()
     p.add_argument("--exp-dir", type=Path, required=False, default=default_exp_dir)
@@ -259,6 +258,11 @@ def parse_args() -> argparse.Namespace:
     )
     args = p.parse_args()
     args = _apply_baseline_preset(args)
+    if args.exp_dir is None and args.cv_manifest is None:
+        raise SystemExit(
+            "No prepared experiment found. Run `uv run python -m kvant.ml_prepare_data.prepare_experiment` "
+            "or pass --exp-dir/--cv-manifest explicitly."
+        )
     args.wandb_name = _auto_wandb_name(args, run_cv=_should_run_cv(args))
     args.meta_features = _parse_meta_features(args.meta_features)
     if not (0.0 <= args.meta_accept_threshold <= 1.0):

@@ -51,7 +51,7 @@ Recommended baseline:
 Command:
 
 ```bash
-cd /home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading
+cd /home/magnus/repositories/Fagprojekt_DayTrading
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --epochs 20 \
   --wandb-name "cv-baseline-w180h1.5-tbpd30-act60-dir60" \

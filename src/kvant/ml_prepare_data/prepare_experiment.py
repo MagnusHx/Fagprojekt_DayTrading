@@ -736,9 +736,10 @@ def prepare_single_dataset(
         lookback_L=L,
         label_semantics=label_semantics_payload(drop_time_exit_label=False),
     )
-    out_root = Path("../ml_framework/prepared")
+    from kvant.ml_prepare_data import prepared_data_root
+
     prepared = prepare_experiment(
-        out_root=out_root,
+        out_root=prepared_data_root,
         cfg=cfg,
         sampler=sampler,
         fe=feature_engineer,

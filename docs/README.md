@@ -1,12 +1,15 @@
-Generating the docs
-----------
+# Documentation
 
-Use [mkdocs](http://www.mkdocs.org/) structure to update the documentation.
+The project uses MkDocs for human-facing documentation.
 
 Build locally with:
 
-    mkdocs build
+```bash
+uv run mkdocs build --config-file docs/mkdocs.yaml --site-dir build
+```
 
 Serve locally with:
 
-    mkdocs serve
+```bash
+uv run mkdocs serve --config-file docs/mkdocs.yaml
+```

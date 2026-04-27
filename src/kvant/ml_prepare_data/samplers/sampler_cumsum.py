@@ -33,11 +33,16 @@ def _aggregate_ohlcv_segments(df: pd.DataFrame, ends: np.ndarray) -> pd.DataFram
         # policy: single bar over entire range
         seg = df.iloc[:]
         bar = {}
-        if "open" in seg: bar["open"] = float(seg["open"].iloc[0])
-        if "high" in seg: bar["high"] = float(seg["high"].max())
-        if "low" in seg: bar["low"] = float(seg["low"].min())
-        if "close" in seg: bar["close"] = float(seg["close"].iloc[-1])
-        if "volume" in seg: bar["volume"] = float(seg["volume"].sum())
+        if "open" in seg:
+            bar["open"] = float(seg["open"].iloc[0])
+        if "high" in seg:
+            bar["high"] = float(seg["high"].max())
+        if "low" in seg:
+            bar["low"] = float(seg["low"].min())
+        if "close" in seg:
+            bar["close"] = float(seg["close"].iloc[-1])
+        if "volume" in seg:
+            bar["volume"] = float(seg["volume"].sum())
         return pd.DataFrame([bar], index=pd.DatetimeIndex([df.index[-1]]))
 
     ends = np.unique(np.clip(ends, 0, len(df) - 1))
@@ -50,11 +55,16 @@ def _aggregate_ohlcv_segments(df: pd.DataFrame, ends: np.ndarray) -> pd.DataFram
             continue
         seg = df.iloc[start : end + 1]
         bar = {}
-        if "open" in seg: bar["open"] = float(seg["open"].iloc[0])
-        if "high" in seg: bar["high"] = float(seg["high"].max())
-        if "low" in seg: bar["low"] = float(seg["low"].min())
-        if "close" in seg: bar["close"] = float(seg["close"].iloc[-1])
-        if "volume" in seg: bar["volume"] = float(seg["volume"].sum())
+        if "open" in seg:
+            bar["open"] = float(seg["open"].iloc[0])
+        if "high" in seg:
+            bar["high"] = float(seg["high"].max())
+        if "low" in seg:
+            bar["low"] = float(seg["low"].min())
+        if "close" in seg:
+            bar["close"] = float(seg["close"].iloc[-1])
+        if "volume" in seg:
+            bar["volume"] = float(seg["volume"].sum())
         rows.append(bar)
         idx.append(df.index[end])
         start = end + 1

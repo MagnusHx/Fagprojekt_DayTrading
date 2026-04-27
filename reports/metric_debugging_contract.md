@@ -7,7 +7,7 @@ This project now treats metrics as four semantic layers:
 - `split/execution/*`: signal-to-executed-trade translation
 - `split/paper/*`: economic outcomes
 
-The code-level source of truth is [metric_registry.py](/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/train/metric_registry.py:1).
+The code-level source of truth is [metric_registry.py](../src/kvant/ml_framework/train/metric_registry.py).
 
 ## Primary Debug Metrics
 
@@ -58,7 +58,7 @@ The code-level source of truth is [metric_registry.py](/home/magnus/repositories
 ## Golden-Fold Reconciliation Workflow
 
 1. Train with the default best-checkpoint bundle output or provide `--checkpoint-out-dir`.
-2. Use [reconcile_metrics.py](/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/scripts/reconcile_metrics.py:1) with:
+2. Use [reconcile_metrics.py](../src/kvant/ml_framework/scripts/reconcile_metrics.py) with:
    - `--bundle`
    - optional `--wandb-summary`
    - optional `--summary-prefix`

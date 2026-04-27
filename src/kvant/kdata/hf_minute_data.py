@@ -1,15 +1,18 @@
-
 # from historical_stuff.data_vectorbt_example import MONTH_FILE
+from collections import defaultdict
+from dataclasses import dataclass
+import hashlib
+import os
+from typing import Iterable, Optional
+
+from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import HfHubHTTPError
+from huggingface_hub.utils import LocalEntryNotFoundError
 from kvant.kdata.hf_download_utils import load_one_month
 import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
-import os
 import pyarrow.parquet as pq
-from huggingface_hub import hf_hub_download
-from huggingface_hub.errors import HfHubHTTPError
-from huggingface_hub.utils import LocalEntryNotFoundError
-from collections import defaultdict
 import tqdm
 
 REPO_ID = "mito0o852/OHLCV-1m"
@@ -91,8 +94,6 @@ def google_1_month():
     ticker = 'GOOG'
     tickers = prepare_single_ticker(month_file=MONTH_FILE, ticker=ticker, impute_missing_minutes=True)
     return tickers
-
-from dataclasses import dataclass
 
 @dataclass
 class DatasetConfiguration:
@@ -260,8 +261,6 @@ too many tickers!
     return downloaded_datasets
 
 
-import hashlib
-
 def _tuple_to_code(tup):
     # Join the tuple into a single string
     string = '|'.join(tup)
@@ -332,9 +331,6 @@ def get_huggingface_top_10_tiny_splits():
     return get_huggingface_top_n_tiny_splits(n=10, warmup_quarters=2)
 
 
-from typing import Optional, Iterable
-
-
 def get_ticker_data(downloaded_dataset : DownloadedDatasetSplit):
     def load_concat_split_by_ticker(pq_files: list[str], only_use_tickers: Optional[Iterable[str]] = None):
         # 1) Load + concatenate
@@ -367,6 +363,8 @@ def get_ticker_data(downloaded_dataset : DownloadedDatasetSplit):
     return ticker_data_train, ticker_data_val, ticker_data_test
 
 if __name__ == "__main__":
+    from kvant.kmarket_info.is_nyse_open import is_nyse_available
+
     # load_one_month(MONTH_FILE)
     # Download and get top-200 stock splits (train, test, val).
     # downloaded_splits = get_huggingface_top_200_splits()
@@ -467,7 +465,7 @@ if __name__ == "__main__":
 
         # color map for labels; None -> black
         color_map = {0: "red", 1: "blue", 2: "green", None: "black"}
-        colors = [color_map.get(l, "black") for l in labels]
+        colors = [color_map.get(label_value, "black") for label_value in labels]
 
         label_counts = pd.Series(labels).value_counts(dropna=False)
         summary_lines = [
