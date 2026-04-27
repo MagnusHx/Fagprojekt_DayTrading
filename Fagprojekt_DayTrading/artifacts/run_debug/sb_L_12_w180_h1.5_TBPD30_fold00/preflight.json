@@ -1,8 +1,8 @@
 {
   "exp_dir": "/home/magnus/repositories/Fagprojekt_DayTrading/Fagprojekt_DayTrading/src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_fold00",
-  "label_regime": "three_class",
+  "label_regime": "event_outcome",
   "n_classes": 3,
-  "n_features": 36,
+  "n_features": 16,
   "has_market_data": true,
   "split_summaries": {
     "train": {
@@ -41,7 +41,7 @@
   },
   "feature_checks": {
     "total_rows": 615714,
-    "n_features": 36,
+    "n_features": 16,
     "nonfinite_feature_values": 0
   },
   "dependency_checks": {

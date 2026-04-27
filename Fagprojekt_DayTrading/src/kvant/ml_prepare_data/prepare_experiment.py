@@ -4,6 +4,10 @@ from kvant.ml_prepare_data.features.feature_engineering import (
     StandardizedFeatures,
     FeatureEngineer,
 )
+from kvant.ml_prepare_data.features.feature_selection import (
+    FeatureSelector,
+    PrimarySideFScoreSelector,
+)
 import json
 import hashlib
 from dataclasses import dataclass, asdict, field
@@ -12,12 +16,16 @@ import numpy as np
 import pandas as pd
 import tqdm
 
-from kvant.labels import label_semantics_payload, pipeline_label_spaces_payload
+from kvant.labels import (
+    event_labels_to_side_labels,
+    label_semantics_payload,
+    pipeline_label_spaces_payload,
+)
 from kvant.ml_prepare_data.labelling.tripple_bar import Labeler, TripleBarrierLabeler
 from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
 from kvant.ml_prepare_data.reporting import report_sampling_density, report_sampling_timeline
 from kvant.ml_prepare_data.samplers.sampler_cumsum import TunedCUSUMBarSampler
-from typing import Dict, Optional, List  # add Any, List
+from typing import Dict, Optional, List
 from kvant.kdata.hf_minute_data import (
     get_ticker_data,
     DownloadedDatasetSplit,
@@ -38,6 +46,7 @@ class ExperimentConfig:
     feature_engineer: dict
     labeler: dict
     lookback_L: int
+    feature_selector: Optional[dict] = None
     label_semantics: dict = field(default_factory=lambda: label_semantics_payload(drop_time_exit_label=False))
 
     def stable_id(self) -> str:
@@ -101,12 +110,53 @@ def save_ticker_artifacts(
         save_label_metadata_jsonl(tdir, label_metadata)
 
 
-def _config_payload(cfg: ExperimentConfig, fe: FeatureEngineer | None = None) -> dict:
+def _feature_selector_payload(selector: FeatureSelector | None) -> Optional[dict]:
+    if selector is None:
+        return None
+    getter = getattr(selector, "get_meta", None)
+    if callable(getter):
+        return getter()
+    return asdict(selector)
+
+
+def _subset_feature_engineer_payload(feature_payload: dict, selector: FeatureSelector | None) -> dict:
+    if selector is None:
+        return feature_payload
+
+    selected_indices = getattr(selector, "selected_indices_", None)
+    selected_feature_names = getattr(selector, "selected_feature_names_", None)
+    original_feature_names = getattr(selector, "feature_names_", None)
+    if selected_indices is None or selected_feature_names is None or original_feature_names is None:
+        return feature_payload
+
+    chosen = np.asarray(selected_indices, dtype=np.int64)
+    original_len = int(len(original_feature_names))
+
+    out = dict(feature_payload)
+    out["feature_names_"] = list(selected_feature_names)
+    for key in ("mean_", "std_", "n_samples_seen_", "sum_", "sumsq_"):
+        value = out.get(key)
+        if value is None:
+            continue
+        arr = np.asarray(value)
+        if arr.ndim != 1 or len(arr) != original_len:
+            continue
+        out[key] = arr[chosen].tolist()
+    return out
+
+
+def _config_payload(
+    cfg: ExperimentConfig,
+    fe: FeatureEngineer | None = None,
+    selector: FeatureSelector | None = None,
+) -> dict:
     payload = asdict(cfg)
     payload["pipeline_stage"] = "event_outcome"
     payload["label_spaces"] = pipeline_label_spaces_payload()
     if fe is not None:
-        payload["feature_engineer"] = asdict(fe)
+        payload["feature_engineer"] = _subset_feature_engineer_payload(asdict(fe), selector)
+    if selector is not None:
+        payload["feature_selector"] = _feature_selector_payload(selector)
     return payload
 
 
@@ -168,6 +218,67 @@ def _in_split(tt, split: str, val_start, test_start) -> bool:
     raise ValueError(split)
 
 
+def _fit_feature_selector_on_train(
+    *,
+    tickers_train: list[str],
+    minute_train_chunks: Dict[str, pd.DataFrame],
+    sampler: BaseBarSampler,
+    fe: FeatureEngineer,
+    labeler: Labeler,
+    lookback_L: int,
+    feature_selector: FeatureSelector | None,
+) -> FeatureSelector | None:
+    if feature_selector is None:
+        return None
+
+    selector_X: list[np.ndarray] = []
+    selector_y: list[np.ndarray] = []
+    feature_names_ref: list[str] | None = None
+
+    for ticker in tqdm.tqdm(tickers_train, desc="Fitting feature selector", dynamic_ncols=True):
+        dft = minute_train_chunks.get(ticker)
+        if dft is None or len(dft) == 0:
+            continue
+
+        dft_s = sampler.transform(dft, ticker=ticker)
+        if dft_s is None or len(dft_s) == 0:
+            continue
+        dft_s = ensure_utc_sorted_index(dft_s)
+
+        X_full, feat_names = fe.transform(dft)
+        if feature_names_ref is None:
+            feature_names_ref = list(feat_names)
+        elif list(feat_names) != feature_names_ref:
+            raise RuntimeError("Feature names changed between train chunks during feature-selection fit.")
+
+        feat_df_full = pd.DataFrame(X_full, index=dft.index, columns=feat_names)
+        X_sampled = feat_df_full.loc[dft_s.index].to_numpy(dtype=np.float32, copy=False)
+        y_sampled, _ = labeler.transform(dft_s)
+        valid_pos = valid_target_positions(y_sampled, lookback_L)
+        if len(valid_pos) == 0:
+            continue
+
+        side_targets = event_labels_to_side_labels(y_sampled[valid_pos])
+        keep = side_targets >= 0
+        if not np.any(keep):
+            continue
+
+        selector_X.append(X_sampled[valid_pos][keep])
+        selector_y.append(side_targets[keep].astype(np.int64, copy=False))
+
+    if feature_names_ref is None or not selector_X:
+        raise RuntimeError(
+            "No train-only primary-side samples were available to fit the feature selector."
+        )
+
+    feature_selector.fit(
+        np.concatenate(selector_X, axis=0),
+        np.concatenate(selector_y, axis=0),
+        feature_names=feature_names_ref,
+    )
+    return feature_selector
+
+
 # ============================================================
 # 5) Preparation Orchestrator
 # ============================================================
@@ -190,6 +301,7 @@ def prepare_experiment(
     ticker_dfs_val: Dict[str, pd.DataFrame],
     ticker_dfs_test: Dict[str, pd.DataFrame],
     experiment_id: str = None,  # Provide a stable id of the experiment.
+    feature_selector: FeatureSelector | None = None,
 ) -> PreparedExperimentManifest:
     """
     Key behavior:
@@ -289,7 +401,7 @@ def prepare_experiment(
     exp_id = cfg.stable_id() if experiment_id is None else experiment_id
     exp_dir = out_root / exp_id
     exp_dir.mkdir(parents=True, exist_ok=True)
-    (exp_dir / "config.json").write_text(json.dumps(_config_payload(cfg), indent=2, default=str))
+    (exp_dir / "config.json").write_text(json.dumps(_config_payload(cfg, selector=feature_selector), indent=2, default=str))
 
     tickers_train = sorted(ticker_dfs_train.keys())
     tickers_val = sorted(ticker_dfs_val.keys())
@@ -342,7 +454,7 @@ def prepare_experiment(
 
     # 3) Collect full minute-resolution train chunks for feature fitting.
     print(f"[{exp_id}] Collecting minute train data for feature fitting...")
-    df_fit_sampled = None
+    sampled_train_chunks: list[pd.DataFrame] = []
     for ticker in tqdm.tqdm(tickers_train, desc="Collecting minute train chunks", dynamic_ncols=True):
         dft = ticker_dfs_train.get(ticker)
         if dft is None or len(dft) == 0:
@@ -372,17 +484,27 @@ def prepare_experiment(
         if dft_s is None or len(dft_s) == 0:
             continue
         dft_s = ensure_utc_sorted_index(dft_s)
-        if df_fit_sampled is None:
-            df_fit_sampled = dft_s
+        sampled_train_chunks.append(dft_s)
 
-    if df_fit_sampled is None:
+    df_fit_sampled = _concat_nonempty(sampled_train_chunks)
+
+    if len(df_fit_sampled) == 0:
         raise RuntimeError(
             "No sampled training rows available to fit labeler. "
             "This usually means your sampler is too sparse or train data is empty."
         )
 
     labeler.fit(df_fit_sampled)
-    (exp_dir / "config.json").write_text(json.dumps(_config_payload(cfg, fe), indent=2, default=str))
+    feature_selector = _fit_feature_selector_on_train(
+        tickers_train=tickers_train,
+        minute_train_chunks=minute_train_chunks,
+        sampler=sampler,
+        fe=fe,
+        labeler=labeler,
+        lookback_L=cfg.lookback_L,
+        feature_selector=feature_selector,
+    )
+    (exp_dir / "config.json").write_text(json.dumps(_config_payload(cfg, fe, feature_selector), indent=2, default=str))
     # --------------------------------------------------------
     # Process each ticker on full history (train+val+test)
     # --------------------------------------------------------
@@ -420,6 +542,8 @@ def prepare_experiment(
         # Features are computed on the full minute-resolution dataframe first,
         # then sampled at the timestamps selected by the sampler.
         X_full, feat_names = fe.transform(df_full_raw)
+        if feature_selector is not None:
+            X_full, feat_names = feature_selector.transform(X_full, feat_names)
         feat_df_full = pd.DataFrame(X_full, index=df_full_raw.index, columns=feat_names)
         try:
             feat_df_sampled = feat_df_full.loc[df1.index]
@@ -510,6 +634,9 @@ def prepare_experiment(
             "ticker": t,
             "membership": membership,
             "feature_names": feat_names,
+            "selected_feature_names": None
+            if feature_selector is None
+            else list(getattr(feature_selector, "selected_feature_names_", feat_names)),
             "market_data_columns": list(MARKET_DATA_COLUMNS),
             "sampler_name": sampler.name,
             "sampler_global_meta": sampler_global_meta,
@@ -586,7 +713,14 @@ def prepare_experiment(
     )
 
 
-def prepare_single_dataset(dataset_split: DownloadedDatasetSplit, sampler, feature_engineer, labeler, L=64):
+def prepare_single_dataset(
+    dataset_split: DownloadedDatasetSplit,
+    sampler,
+    feature_engineer,
+    labeler,
+    L=64,
+    feature_selector: FeatureSelector | None = None,
+):
     ticker_data_train, ticker_data_val, ticker_data_test = get_ticker_data(dataset_split)
 
     # sampler = IdentitySampler(subsample_every=1)
@@ -597,6 +731,7 @@ def prepare_single_dataset(dataset_split: DownloadedDatasetSplit, sampler, featu
         experiment_name="exp_minimal_sep_components",
         sampler=asdict(sampler),
         feature_engineer=asdict(feature_engineer),
+        feature_selector=None if feature_selector is None else asdict(feature_selector),
         labeler=asdict(labeler),
         lookback_L=L,
         label_semantics=label_semantics_payload(drop_time_exit_label=False),
@@ -611,6 +746,7 @@ def prepare_single_dataset(dataset_split: DownloadedDatasetSplit, sampler, featu
         ticker_dfs_train=ticker_data_train,
         ticker_dfs_val=ticker_data_val,
         ticker_dfs_test=ticker_data_test,
+        feature_selector=feature_selector,
     )
     print("Experiment prepared at:", prepared.exp_dir)
     return prepared
@@ -624,7 +760,9 @@ def main():
 
     TBPD = 30
     L, width, height_pct = 12, 180, 1.5
-    drop_time_exit_label = True
+    # Keep raw triple-barrier event labels by default; the training pipeline now
+    # derives primary-side targets downstream and expects 3-class prepared artifacts.
+    drop_time_exit_label = False
     label_suffix = "_droptexit" if drop_time_exit_label else ""
     label = f"sb_L_{L}_w{width}_h{height_pct}_TBPD{TBPD}{label_suffix}"
     print(f"Writing to {label=}")
@@ -645,6 +783,7 @@ def main():
             fillna_value=0.0,
         )
         fe = StandardizedFeatures(base=base_fe)
+        feature_selector = PrimarySideFScoreSelector(top_k=16)
         labeler = TripleBarrierLabeler(
             name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=drop_time_exit_label
         )
@@ -653,6 +792,7 @@ def main():
             experiment_name="exp_minimal_sep_components",
             sampler=asdict(sampler),
             feature_engineer=asdict(fe),
+            feature_selector=asdict(feature_selector),
             labeler=asdict(labeler),
             lookback_L=L,
             label_semantics=label_semantics_payload(drop_time_exit_label=False),
@@ -669,6 +809,7 @@ def main():
             ticker_dfs_val=ticker_data_val,
             ticker_dfs_test=ticker_data_test,
             experiment_id=fold_id,
+            feature_selector=feature_selector,
         )
         report_sampling_density(prepared.exp_dir, bins=60, print_table=True, max_plot_tickers=4)
         print("Experiment prepared at:", prepared.exp_dir)

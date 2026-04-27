@@ -57,6 +57,32 @@ def _dependency_available(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
 
 
+def _coerced_metadata_vector_length(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return int(len(value))
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return 0
+        if text.startswith("[") and text.endswith("]"):
+            inner = text[1:-1].strip()
+            if not inner:
+                return 0
+            try:
+                arr = np.fromstring(inner, sep=" ")
+            except Exception:
+                arr = np.asarray([])
+            if arr.size > 0:
+                return int(arr.size)
+        return int(len(value))
+    try:
+        return int(len(value))
+    except Exception:
+        return None
+
+
 def _split_summary(exp: PreparedExperiment, split_name: str, index: np.ndarray) -> dict[str, Any]:
     if index.ndim != 2 or index.shape[1] != 2:
         raise RunValidationError(
@@ -211,14 +237,17 @@ def validate_prepared_experiment(
     feature_names = feature_engineer_cfg.get("feature_names_")
     mean_ = feature_engineer_cfg.get("mean_")
     std_ = feature_engineer_cfg.get("std_")
-    if feature_names is not None and len(feature_names) != n_features:
+    feature_names_len = _coerced_metadata_vector_length(feature_names)
+    mean_len = _coerced_metadata_vector_length(mean_)
+    std_len = _coerced_metadata_vector_length(std_)
+    if feature_names_len is not None and feature_names_len != n_features:
         raise RunValidationError(
-            f"{exp_dir}: feature_engineer.feature_names_ has length {len(feature_names)}, expected {n_features}."
+            f"{exp_dir}: feature_engineer.feature_names_ has length {feature_names_len}, expected {n_features}."
         )
-    if mean_ is not None and len(mean_) != n_features:
-        raise RunValidationError(f"{exp_dir}: feature_engineer.mean_ has length {len(mean_)}, expected {n_features}.")
-    if std_ is not None and len(std_) != n_features:
-        raise RunValidationError(f"{exp_dir}: feature_engineer.std_ has length {len(std_)}, expected {n_features}.")
+    if mean_len is not None and mean_len != n_features:
+        raise RunValidationError(f"{exp_dir}: feature_engineer.mean_ has length {mean_len}, expected {n_features}.")
+    if std_len is not None and std_len != n_features:
+        raise RunValidationError(f"{exp_dir}: feature_engineer.std_ has length {std_len}, expected {n_features}.")
 
     if getattr(exp.store, "pipeline_stage", "legacy") == "event_outcome":
         label_regime = "event_outcome"

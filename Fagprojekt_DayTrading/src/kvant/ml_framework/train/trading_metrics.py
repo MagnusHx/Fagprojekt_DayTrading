@@ -17,6 +17,7 @@ class ExecutedTrade:
     true_label: int | None
     open_time: pd.Timestamp
     close_time: pd.Timestamp
+    bet_size: float
     gross_return: float
     net_return: float
 
@@ -39,9 +40,12 @@ def _candidate_trade(
     y_pred_value: int,
     meta: Optional[dict],
     tid: int | None,
+    bet_size: float,
     transaction_cost: float,
 ) -> Optional[ExecutedTrade]:
     if meta is None or y_pred_value not in ACTED_LABELS:
+        return None
+    if not np.isfinite(float(bet_size)) or float(bet_size) <= 0.0:
         return None
 
     pnl_frac = meta.get("pnl_fraction")
@@ -55,6 +59,8 @@ def _candidate_trade(
 
     gross_return = float(pnl_frac) if y_pred_value == LABEL_UP else -float(pnl_frac)
     net_return = gross_return - (2.0 * float(transaction_cost))
+    gross_return *= float(bet_size)
+    net_return *= float(bet_size)
 
     return ExecutedTrade(
         tid=tid,
@@ -62,6 +68,7 @@ def _candidate_trade(
         true_label=int(meta["label"]) if isinstance(meta.get("label"), (int, float)) else None,
         open_time=open_time,
         close_time=close_time,
+        bet_size=float(bet_size),
         gross_return=float(gross_return),
         net_return=float(net_return),
     )
@@ -157,6 +164,7 @@ def simulate_position_aware_trades(
     y_pred: np.ndarray,
     metas: List[Optional[dict]],
     tids: Optional[np.ndarray] = None,
+    bet_sizes: Optional[np.ndarray] = None,
     transaction_cost: float = 0.0,
 ) -> List[ExecutedTrade]:
     """Simulate non-overlapping trades from prediction signals.
@@ -167,14 +175,18 @@ def simulate_position_aware_trades(
     assert len(y_pred) == len(metas)
     if tids is not None:
         assert len(tids) == len(y_pred)
+    if bet_sizes is not None:
+        assert len(bet_sizes) == len(y_pred)
 
     candidates: List[ExecutedTrade] = []
     for idx, (yp, meta) in enumerate(zip(y_pred, metas)):
         tid = None if tids is None else int(tids[idx])
+        bet_size = 1.0 if bet_sizes is None else float(bet_sizes[idx])
         candidate = _candidate_trade(
             y_pred_value=int(yp),
             meta=meta,
             tid=tid,
+            bet_size=bet_size,
             transaction_cost=transaction_cost,
         )
         if candidate is not None:
@@ -199,6 +211,7 @@ def per_ticker_trade_stats(
     y_pred: np.ndarray,
     metas: List[Optional[dict]],
     tids: np.ndarray,
+    bet_sizes: Optional[np.ndarray] = None,
     transaction_cost: float = 0.0,
 ) -> Dict[int, Dict[str, Any]]:
     """
@@ -208,6 +221,7 @@ def per_ticker_trade_stats(
         y_pred=y_pred,
         metas=metas,
         tids=tids,
+        bet_sizes=bet_sizes,
         transaction_cost=transaction_cost,
     )
     by_tid: Dict[int, Dict[str, list]] = defaultdict(lambda: {"pct_change": [], "acc": []})
@@ -237,6 +251,7 @@ def compute_return_stats(
     y_pred: np.ndarray,
     metas: List[Optional[dict]],
     tids: Optional[np.ndarray] = None,
+    bet_sizes: Optional[np.ndarray] = None,
     transaction_cost: float = 0.0,
 ) -> Dict[str, Any]:
     """Compute overall executed-trade return statistics."""
@@ -244,6 +259,7 @@ def compute_return_stats(
         y_pred=y_pred,
         metas=metas,
         tids=tids,
+        bet_sizes=bet_sizes,
         transaction_cost=transaction_cost,
     )
 
@@ -263,6 +279,7 @@ def compute_action_profit_stats(
     y_pred: np.ndarray,
     metas: List[Optional[dict]],
     tids: np.ndarray,
+    bet_sizes: Optional[np.ndarray] = None,
     transaction_cost: float = 0.0,
 ) -> Dict[int, Dict[str, Any]]:
     """
@@ -272,6 +289,7 @@ def compute_action_profit_stats(
         y_pred=y_pred,
         metas=metas,
         tids=tids,
+        bet_sizes=bet_sizes,
         transaction_cost=transaction_cost,
     )
 
@@ -308,6 +326,7 @@ def compute_profit_curve_over_trades(
     y_pred: np.ndarray,
     metas: List[Optional[dict]],
     tids: Optional[np.ndarray] = None,
+    bet_sizes: Optional[np.ndarray] = None,
     transaction_cost: float = 0.0,
 ) -> Dict[str, List[float]]:
     """Compute the cumulative profit curve over executed trades."""
@@ -315,6 +334,7 @@ def compute_profit_curve_over_trades(
         y_pred=y_pred,
         metas=metas,
         tids=tids,
+        bet_sizes=bet_sizes,
         transaction_cost=transaction_cost,
     )
     trade_profit_pct = [trade.net_return * 100.0 for trade in executed]

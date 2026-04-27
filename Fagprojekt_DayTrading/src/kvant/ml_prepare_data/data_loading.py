@@ -41,13 +41,16 @@ class PreparedStore:
     def __init__(self, exp_dir: Path):
         self.exp_dir = exp_dir
         self.cfg = json.loads((exp_dir / "config.json").read_text())
-        self.pipeline_stage = str(self.cfg.get("pipeline_stage", "legacy"))
         self.label_spaces = dict(self.cfg.get("label_spaces") or {})
         self.label_semantics = validate_label_semantics(self.cfg, exp_dir=exp_dir)
         self.label_ids = label_ids_from_semantics(self.label_semantics)
         self.label_meanings = label_meanings_from_semantics(self.label_semantics)
         self.class_names = class_names_from_semantics(self.label_semantics)
         self.n_classes = len(self.label_ids)
+        self.pipeline_stage = str(
+            self.cfg.get("pipeline_stage")
+            or ("event_outcome" if self.n_classes == 3 else "legacy")
+        )
         feature_engineer_cfg = (self.cfg.get("feature_engineer") or {}) if isinstance(self.cfg, dict) else {}
         feature_names = feature_engineer_cfg.get("feature_names_")
         self.feature_names = tuple(str(name) for name in feature_names) if feature_names else None

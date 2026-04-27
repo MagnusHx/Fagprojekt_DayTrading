@@ -8,7 +8,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from kvant.labels import LABEL_UP, META_LABEL_TAKE, side_labels_to_trade_labels
+from kvant.labels import LABEL_DOWN, LABEL_EXIT, LABEL_UP, META_LABEL_TAKE, side_labels_to_trade_labels
 from kvant.ml_prepare_data.data_loading import PreparedStore
 
 
@@ -75,6 +75,58 @@ def meta_targets_from_predictions(
         signed_return = pnl_fraction if int(trade_label) == LABEL_UP else -pnl_fraction
         out[i] = int(signed_return > 0.0)
     return out
+
+
+def kelly_bet_fraction(
+    take_proba: np.ndarray,
+    *,
+    payoff_ratio: float = 1.0,
+    fraction: float = 1.0,
+) -> np.ndarray:
+    """Convert take probabilities into long/short bet magnitudes with Kelly sizing."""
+    if float(payoff_ratio) <= 0.0:
+        raise ValueError("payoff_ratio must be positive.")
+    if float(fraction) < 0.0:
+        raise ValueError("fraction must be non-negative.")
+
+    take_proba = np.asarray(take_proba, dtype=np.float64)
+    edge = ((float(payoff_ratio) + 1.0) * take_proba - 1.0) / float(payoff_ratio)
+    sized = np.clip(edge, 0.0, 1.0) * float(fraction)
+    return np.clip(sized, 0.0, 1.0)
+
+
+def sized_trade_decisions(
+    *,
+    side_pred: np.ndarray,
+    take_proba: np.ndarray,
+    accept_threshold: float,
+    payoff_ratio: float = 1.0,
+    fraction: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Turn side predictions plus meta probabilities into trade labels and Kelly sizes."""
+    if not (0.0 <= float(accept_threshold) <= 1.0):
+        raise ValueError("accept_threshold must be between 0 and 1.")
+
+    side_pred = np.asarray(side_pred, dtype=np.int64)
+    take_proba = np.asarray(take_proba, dtype=np.float64)
+    if len(side_pred) != len(take_proba):
+        raise ValueError(f"side_pred and take_proba must align, got {len(side_pred)} and {len(take_proba)}.")
+
+    proposed_trade = side_labels_to_trade_labels(side_pred)
+    bet_size = kelly_bet_fraction(
+        take_proba,
+        payoff_ratio=float(payoff_ratio),
+        fraction=float(fraction),
+    )
+    accepted = (take_proba >= float(accept_threshold)) & (bet_size > 0.0)
+
+    y_trade = np.full(len(proposed_trade), LABEL_EXIT, dtype=np.int64)
+    y_trade[accepted] = proposed_trade[accepted]
+
+    signed_bet_size = np.zeros(len(bet_size), dtype=np.float64)
+    signed_bet_size[y_trade == LABEL_UP] = bet_size[y_trade == LABEL_UP]
+    signed_bet_size[y_trade == LABEL_DOWN] = -bet_size[y_trade == LABEL_DOWN]
+    return y_trade, bet_size * accepted.astype(np.float64), signed_bet_size
 
 
 @dataclass

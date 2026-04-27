@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -120,6 +120,15 @@ def test_validate_prepared_experiment_returns_diagnostics_for_binary_fixture(tmp
     assert diagnostics.split_summaries["train"]["n"] == 1
 
 
+def test_validate_prepared_experiment_infers_event_outcome_for_three_class_fixture(tmp_path) -> None:
+    exp_dir = _write_prepared_fixture(tmp_path, binary=False, with_market_data=True)
+
+    diagnostics = validate_prepared_experiment(exp_dir, require_market_data=True)
+
+    assert diagnostics.label_regime == "event_outcome"
+    assert diagnostics.n_classes == 3
+
+
 def test_validate_prepared_experiment_fails_when_market_data_is_required(tmp_path) -> None:
     exp_dir = _write_prepared_fixture(tmp_path, binary=True, with_market_data=False)
 
@@ -191,6 +200,44 @@ class _ConstantUpLabeler:
         return labels, metadata
 
 
+@dataclass
+class _RecordingFeatureSelector:
+    name: str = "recording_selector"
+
+    fit_rows: int | None = field(default=None, init=False)
+    fit_targets: list[int] = field(default_factory=list, init=False)
+    feature_names_: list[str] | None = field(default=None, init=False)
+    selected_indices_: list[int] | None = field(default=None, init=False)
+    selected_feature_names_: list[str] | None = field(default=None, init=False)
+
+    def fit(self, X: np.ndarray, y: np.ndarray, *, feature_names: list[str]):
+        self.fit_rows = int(len(X))
+        self.fit_targets = [int(v) for v in y]
+        self.feature_names_ = [str(name) for name in feature_names]
+        self.selected_indices_ = [0]
+        self.selected_feature_names_ = [self.feature_names_[0]]
+        return self
+
+    def transform(self, X: np.ndarray, feature_names: list[str]):
+        if self.selected_indices_ is None or self.feature_names_ is None:
+            raise RuntimeError("selector not fit")
+        names = [str(name) for name in feature_names]
+        if names != self.feature_names_:
+            raise RuntimeError("feature names drifted")
+        return np.asarray(X)[:, self.selected_indices_], list(self.selected_feature_names_)
+
+    def get_meta(self) -> dict:
+        return {
+            "name": self.name,
+            "fit_rows": self.fit_rows,
+            "fit_targets": list(self.fit_targets),
+            "selected_indices": None if self.selected_indices_ is None else list(self.selected_indices_),
+            "selected_feature_names": None
+            if self.selected_feature_names_ is None
+            else list(self.selected_feature_names_),
+        }
+
+
 def test_prepare_experiment_computes_features_before_sampling(tmp_path) -> None:
     from kvant.ml_prepare_data.prepare_experiment import ExperimentConfig, prepare_experiment
 
@@ -228,6 +275,53 @@ def test_prepare_experiment_computes_features_before_sampling(tmp_path) -> None:
     saved = np.load(prepared.exp_dir / "tickers" / "AAA" / "features.npy")
 
     np.testing.assert_allclose(saved[:, 0], np.asarray([1.0, 1.0, 1.0], dtype=np.float32))
+
+
+def test_prepare_experiment_feature_selector_is_fit_on_train_only_and_rewrites_metadata(tmp_path) -> None:
+    from kvant.ml_prepare_data.prepare_experiment import ExperimentConfig, prepare_experiment
+
+    idx = pd.date_range("2024-01-01 09:30:00", periods=6, freq="min", tz="UTC")
+    df = pd.DataFrame(
+        {
+            "open": [10, 11, 12, 13, 14, 15],
+            "high": [10, 11, 12, 13, 14, 15],
+            "low": [10, 11, 12, 13, 14, 15],
+            "close": [10, 11, 12, 13, 14, 15],
+            "volume": [100, 101, 102, 103, 104, 105],
+        },
+        index=idx,
+    )
+    selector = _RecordingFeatureSelector()
+    cfg = ExperimentConfig(
+        experiment_name="train_only_feature_selection",
+        sampler={"name": "every_other"},
+        feature_engineer={"name": "lagged_diff"},
+        labeler={"name": "constant_up"},
+        lookback_L=1,
+        feature_selector={"name": selector.name},
+    )
+
+    prepared = prepare_experiment(
+        out_root=tmp_path,
+        cfg=cfg,
+        sampler=_EveryOtherSampler(name="every_other"),
+        fe=_LaggedDiffFeatureEngineer(),
+        labeler=_ConstantUpLabeler(),
+        ticker_dfs_train={"AAA": df.iloc[:4]},
+        ticker_dfs_val={"AAA": df.iloc[4:5]},
+        ticker_dfs_test={"AAA": df.iloc[5:]},
+        experiment_id="train_only_feature_selection",
+        feature_selector=selector,
+    )
+
+    saved = np.load(prepared.exp_dir / "tickers" / "AAA" / "features.npy")
+    saved_cfg = json.loads((prepared.exp_dir / "config.json").read_text())
+
+    assert selector.fit_rows == 1
+    assert selector.fit_targets == [1]
+    assert saved.shape == (3, 1)
+    assert saved_cfg["feature_engineer"]["feature_names_"] == ["close_diff_prev_minute"]
+    assert saved_cfg["feature_selector"]["selected_feature_names"] == ["close_diff_prev_minute"]
 
 
 def test_validate_cv_manifest_accepts_pointer_txt(tmp_path) -> None:

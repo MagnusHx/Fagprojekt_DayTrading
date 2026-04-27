@@ -12,14 +12,17 @@ from kvant.labels import (
     ACTED_LABELS,
     LABEL_EXIT,
     META_LABEL_TAKE,
-    event_labels_to_side_labels,
-    side_labels_to_trade_labels,
 )
 from kvant.ml_prepare_data.data_loading import PreparedStore
 
 from .backtest import BacktestTradeSimulator, compute_paper_trading_metrics
 from .classification_metrics import classification_metrics
-from .decision_policy import LogisticMetaLabeler, meta_targets_from_predictions, normalize_meta_features
+from .decision_policy import (
+    LogisticMetaLabeler,
+    meta_targets_from_predictions,
+    normalize_meta_features,
+    sized_trade_decisions,
+)
 from .predict import predict
 from .trading_metrics import compute_action_profit_stats, compute_profit_curve_over_trades
 
@@ -40,6 +43,8 @@ class EvalConfig:
     meta_features: tuple[str, ...] = ("proba", "embedding")
     meta_random_state: int = 1337
     meta_accept_threshold: float = 0.5
+    kelly_fraction: float = 1.0
+    kelly_payoff_ratio: float = 1.0
 
 
 class ExperimentEvaluator:
@@ -64,6 +69,10 @@ class ExperimentEvaluator:
             raise RuntimeError(f"Unsupported meta_model={self.cfg.meta_model!r}.")
         if not (0.0 <= float(self.cfg.meta_accept_threshold) <= 1.0):
             raise RuntimeError("meta_accept_threshold must be between 0 and 1.")
+        if float(self.cfg.kelly_fraction) < 0.0:
+            raise RuntimeError("kelly_fraction must be non-negative.")
+        if float(self.cfg.kelly_payoff_ratio) <= 0.0:
+            raise RuntimeError("kelly_payoff_ratio must be positive.")
         if self.cfg.compute_paper_trading_metrics:
             if int(self.cfg.backtest_width_minutes) <= 0:
                 raise RuntimeError("Paper trading metrics require a positive backtest_width_minutes setting.")
@@ -112,10 +121,15 @@ class ExperimentEvaluator:
         event_true = self._event_labels_for_pred_out(pred_out)
         meta_true = meta_targets_from_predictions(pred_out=pred_out, store=self.store)
         meta_pred = (np.asarray(take_proba, dtype=np.float64) >= float(self.cfg.meta_accept_threshold)).astype(np.int64)
-        proposed_trade = side_labels_to_trade_labels(side_pred)
-        y_trade = np.where(meta_pred == META_LABEL_TAKE, proposed_trade, LABEL_EXIT).astype(np.int64, copy=False)
+        y_trade, bet_size, _signed_bet_size = sized_trade_decisions(
+            side_pred=side_pred,
+            take_proba=take_proba,
+            accept_threshold=float(self.cfg.meta_accept_threshold),
+            payoff_ratio=float(self.cfg.kelly_payoff_ratio),
+            fraction=float(self.cfg.kelly_fraction),
+        )
 
-        acted_mask = np.isin(y_trade, ACTED_LABELS)
+        acted_mask = np.isin(y_trade, ACTED_LABELS) & (bet_size > 0.0)
         actionable_truth_mask = np.isin(event_true, ACTED_LABELS)
         directional_acted_mask = acted_mask & actionable_truth_mask
         abstained_mask = y_trade == LABEL_EXIT
@@ -209,6 +223,7 @@ class ExperimentEvaluator:
                 y_pred=y_trade,
                 metas=metas,
                 tids=tid,
+                bet_sizes=bet_size,
                 transaction_cost=self.cfg.transaction_cost,
             )
             profit_curve = {
@@ -218,6 +233,7 @@ class ExperimentEvaluator:
                 y_pred=y_trade,
                 metas=metas,
                 tids=tid,
+                bet_sizes=bet_size,
                 transaction_cost=self.cfg.transaction_cost,
             )
             if self.cfg.compute_paper_trading_metrics:
@@ -226,6 +242,7 @@ class ExperimentEvaluator:
                     y_pred=y_trade,
                     tids=tid,
                     tpos=tpos,
+                    bet_sizes=bet_size,
                     simulator=self.paper_trade_simulator,
                     initial_portfolio=self.cfg.initial_portfolio,
                     risk_free_rate=self.cfg.risk_free_rate,

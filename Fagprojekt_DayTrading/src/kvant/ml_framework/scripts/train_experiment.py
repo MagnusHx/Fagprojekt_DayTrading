@@ -4,6 +4,8 @@ import argparse
 import json
 import random
 from pathlib import Path
+import sys
+import re
 
 import numpy as np
 import torch
@@ -42,13 +44,140 @@ def _apply_baseline_preset(args: argparse.Namespace) -> argparse.Namespace:
 
     args.model = "conv1d"
     args.transaction_cost = 0.0
-    if not args.wandb_name:
-        args.wandb_name = "baseline-conv1d-cost0"
     return args
 
 
 def _parse_meta_features(values: list[str] | None) -> tuple[str, ...]:
     return normalize_meta_features(values)
+
+
+def _droptexit_sibling(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    name = path.name
+    if "_droptexit" not in name:
+        return None
+    return path.with_name(name.replace("_droptexit", "", 1))
+
+
+def _config_declares_event_outcome(cfg: dict) -> bool:
+    semantics = (cfg.get("label_semantics") or {}).get("labels") or {}
+    try:
+        label_ids = tuple(sorted(int(k) for k in semantics.keys()))
+    except Exception:
+        return False
+    pipeline_stage = str(cfg.get("pipeline_stage", "event_outcome"))
+    return pipeline_stage == "event_outcome" and label_ids == (0, 1, 2)
+
+
+def _is_event_outcome_exp_dir(exp_dir: Path | None) -> bool:
+    if exp_dir is None:
+        return False
+    cfg_path = Path(exp_dir) / "config.json"
+    if not cfg_path.exists():
+        return False
+    try:
+        cfg = json.loads(cfg_path.read_text())
+    except Exception:
+        return False
+    return _config_declares_event_outcome(cfg)
+
+
+def _resolved_manifest_path(manifest_path: Path | None) -> Path | None:
+    if manifest_path is None or not manifest_path.exists():
+        return None
+    if manifest_path.suffix != ".txt":
+        return manifest_path
+    try:
+        resolved = Path(manifest_path.read_text().strip())
+    except Exception:
+        return None
+    return resolved if resolved.exists() else None
+
+
+def _manifest_declares_event_outcome(manifest_path: Path | None) -> bool:
+    resolved = _resolved_manifest_path(manifest_path)
+    if resolved is None:
+        return False
+    try:
+        payload = json.loads(resolved.read_text())
+    except Exception:
+        return False
+    folds = payload.get("folds", [])
+    if not folds:
+        return False
+    exp_dir = Path(folds[0].get("exp_dir", ""))
+    return _is_event_outcome_exp_dir(exp_dir)
+
+
+def _compatible_default_exp_dir(candidate: Path | None) -> Path | None:
+    if _is_event_outcome_exp_dir(candidate):
+        return candidate
+    sibling = _droptexit_sibling(candidate)
+    if _is_event_outcome_exp_dir(sibling):
+        return sibling
+    return candidate
+
+
+def _compatible_default_manifest(candidate: Path | None) -> Path | None:
+    resolved = _resolved_manifest_path(candidate)
+    if _manifest_declares_event_outcome(resolved):
+        return resolved
+    sibling = _droptexit_sibling(resolved)
+    if _manifest_declares_event_outcome(sibling):
+        return sibling
+    return resolved
+
+
+def _cli_flag_present(argv: list[str], flag: str) -> bool:
+    return any(token == flag or token.startswith(f"{flag}=") for token in argv)
+
+
+def _should_run_cv(args: argparse.Namespace, argv: list[str] | None = None) -> bool:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    explicit_exp_dir = _cli_flag_present(argv, "--exp-dir")
+    explicit_cv_manifest = _cli_flag_present(argv, "--cv-manifest")
+    if explicit_exp_dir and not explicit_cv_manifest:
+        return False
+    return bool(args.cv_manifest is not None and args.cv_manifest.exists())
+
+
+def _slugify_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value).strip())
+    token = re.sub(r"-{2,}", "-", token).strip("-._")
+    return token or "run"
+
+
+def _fmt_compact_float(value: float) -> str:
+    text = f"{float(value):g}"
+    return text.replace(".", "p").replace("-", "m")
+
+
+def _scope_token(path: Path | str | None) -> str:
+    if path is None:
+        return "default"
+    resolved = Path(path)
+    name = resolved.name
+    if name.endswith((".json", ".txt")):
+        name = resolved.stem
+    return _slugify_token(name)
+
+
+def _auto_wandb_name(args: argparse.Namespace, *, run_cv: bool) -> str:
+    if getattr(args, "wandb_name", None):
+        return str(args.wandb_name)
+
+    scope_path = args.cv_manifest if run_cv else args.exp_dir
+    scope_name = _scope_token(scope_path)
+    parts = [
+        "baseline" if getattr(args, "baseline", False) else args.model,
+        scope_name,
+        f"ep{int(args.epochs)}",
+        f"tc{_fmt_compact_float(float(args.transaction_cost))}",
+    ]
+    if not getattr(args, "baseline", False):
+        parts.insert(1, f"meta{_slugify_token(args.pipeline_stage)}")
+    return "-".join(parts)
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,13 +188,11 @@ def parse_args() -> argparse.Namespace:
 
     from kvant.ml_prepare_data import prepared_data_root
 
-    default_exp_dir = prepared_data_root / exp_id
+    default_exp_dir = _compatible_default_exp_dir(prepared_data_root / exp_id)
     default_cv_manifest = None
     cv_ptr = prepared_data_root / "last_experiment_cv_manifest.txt"
     if cv_ptr.exists():
-        p = Path(cv_ptr.read_text().strip())
-        if p.exists():
-            default_cv_manifest = p
+        default_cv_manifest = _compatible_default_manifest(cv_ptr)
     # default_exp_dir = Path("../src/kvant/ml_framework/prepared") / exp_id
 
     p = argparse.ArgumentParser()
@@ -96,6 +223,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pipeline-stage", type=str, choices=("primary_side",), default="primary_side")
     p.add_argument("--initial-portfolio", type=float, default=1.0)
     p.add_argument("--transaction-cost", type=float, default=0.001)
+    p.add_argument("--kelly-fraction", type=float, default=1.0)
+    p.add_argument("--kelly-payoff-ratio", type=float, default=1.0)
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
     p.add_argument(
@@ -130,9 +259,14 @@ def parse_args() -> argparse.Namespace:
     )
     args = p.parse_args()
     args = _apply_baseline_preset(args)
+    args.wandb_name = _auto_wandb_name(args, run_cv=_should_run_cv(args))
     args.meta_features = _parse_meta_features(args.meta_features)
     if not (0.0 <= args.meta_accept_threshold <= 1.0):
         raise SystemExit("--meta-accept-threshold must be between 0 and 1.")
+    if args.kelly_fraction < 0.0:
+        raise SystemExit("--kelly-fraction must be non-negative.")
+    if args.kelly_payoff_ratio <= 0.0:
+        raise SystemExit("--kelly-payoff-ratio must be positive.")
     if args.train_batch_size <= 0 or args.eval_batch_size <= 0 or args.epochs <= 0:
         raise SystemExit("epochs and batch sizes must be positive.")
     return args
@@ -194,6 +328,8 @@ def _save_best_checkpoint_bundle(
             "meta_accept_threshold": float(args.meta_accept_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
+            "kelly_fraction": float(args.kelly_fraction),
+            "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
             "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0)),
@@ -241,10 +377,14 @@ def _make_logger(
             "meta_accept_threshold": float(args.meta_accept_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
+            "kelly_fraction": float(args.kelly_fraction),
+            "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
             "backtest_width_minutes": None,
             "backtest_barrier_height": None,
+            "checkpoint_metric": "val/meta/f1",
+            "metric_pipeline": "side_model -> meta_label -> trade_decision -> execution -> economics",
         },
         enable_optional_media=args.wandb_optional_media,
         per_ticker_chart_limit=args.topk_ticker_plots,
@@ -282,6 +422,8 @@ def _runtime_metadata(args: argparse.Namespace, *, exp_dir: Path, fold_tag: str 
         "meta_features": list(args.meta_features),
         "meta_accept_threshold": float(args.meta_accept_threshold),
         "transaction_cost": float(args.transaction_cost),
+        "kelly_fraction": float(args.kelly_fraction),
+        "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
         "require_market_data": bool(not args.no_return_stats),
         "preflight": preflight,
     }
@@ -370,6 +512,8 @@ def run_single_fold(
             "meta_accept_threshold": float(args.meta_accept_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
+            "kelly_fraction": float(args.kelly_fraction),
+            "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
             "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0)),
@@ -398,6 +542,8 @@ def run_single_fold(
                 meta_accept_threshold=float(args.meta_accept_threshold),
                 initial_portfolio=args.initial_portfolio,
                 transaction_cost=args.transaction_cost,
+                kelly_fraction=float(args.kelly_fraction),
+                kelly_payoff_ratio=float(args.kelly_payoff_ratio),
                 risk_free_rate=args.risk_free_rate,
                 days_per_year=args.days_per_year,
                 backtest_width_minutes=int(labeler_cfg.get("width_minutes", 0)),
@@ -461,7 +607,7 @@ def main() -> None:
     project_root = Path(__file__).resolve().parents[4]
     require_market_data = not args.no_return_stats
 
-    if args.cv_manifest is not None and args.cv_manifest.exists():
+    if _should_run_cv(args):
         manifest_diagnostics = validate_cv_manifest(args.cv_manifest, require_market_data=require_market_data)
         _write_json_artifact(project_root / "artifacts/run_debug/cv_manifest_preflight.json", manifest_diagnostics)
 
@@ -496,7 +642,7 @@ def main() -> None:
                 best_metric = run_single_fold(fold_args, exp_dir=exp_dir, fold_tag=fold_tag, logger=fold_logger)
                 bests.append(best_metric)
                 root_logger.log(
-                    {f"summary/{fold_tag}/best_val_accuracy": float(best_metric)}, step=(i + 1) * steps_per_fold
+                    {f"summary/{fold_tag}/best_val_meta_f1": float(best_metric)}, step=(i + 1) * steps_per_fold
                 )
 
             mean_best = sum(bests) / len(bests)
@@ -504,16 +650,16 @@ def main() -> None:
             std_best = var_best**0.5
             root_logger.log(
                 {
-                    "summary/cv/best_val_accuracy_mean": float(mean_best),
-                    "summary/cv/best_val_accuracy_std": float(std_best),
+                    "summary/cv/best_val_meta_f1_mean": float(mean_best),
+                    "summary/cv/best_val_meta_f1_std": float(std_best),
                     "summary/cv/folds": len(bests),
                 },
                 step=len(folds) * steps_per_fold + 1,
             )
             print("\nCross-validation summary:")
             print(f"  folds={len(bests)}")
-            print(f"  best val/accuracy mean={mean_best:.6f}")
-            print(f"  best val/accuracy std={std_best:.6f}")
+            print(f"  best val/meta/f1 mean={mean_best:.6f}")
+            print(f"  best val/meta/f1 std={std_best:.6f}")
             return
         finally:
             root_logger.stop()

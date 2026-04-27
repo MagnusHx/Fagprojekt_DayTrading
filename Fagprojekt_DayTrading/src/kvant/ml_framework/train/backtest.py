@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Protocol
 import numpy as np
 import pandas as pd
 
-from kvant.labels import ACTED_LABELS, LABEL_DOWN, LABEL_UP
+from kvant.labels import ACTED_LABELS, LABEL_DOWN, LABEL_EXIT, LABEL_UP
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ class BacktestTrade:
     exit_time: pd.Timestamp
     entry_price: float
     exit_price: float
+    bet_size: float
     gross_return: float
     net_return: float
     exit_reason: str
@@ -82,8 +83,11 @@ class BacktestTradeSimulator:
         tid: int,
         tpos: int,
         true_label: Optional[int],
+        bet_size: float,
     ) -> Optional[BacktestTrade]:
         if signal_label not in ACTED_LABELS:
+            return None
+        if not np.isfinite(float(bet_size)) or float(bet_size) <= 0.0:
             return None
 
         market_data = self.market_data_store.market_data(tid)
@@ -151,6 +155,8 @@ class BacktestTradeSimulator:
         else:
             gross_return = (entry_price - exit_price) / entry_price
         net_return = gross_return - (2.0 * float(self.transaction_cost))
+        gross_return *= float(bet_size)
+        net_return *= float(bet_size)
 
         return BacktestTrade(
             tid=int(tid),
@@ -163,6 +169,7 @@ class BacktestTradeSimulator:
             exit_time=exit_time,
             entry_price=float(entry_price),
             exit_price=float(exit_price),
+            bet_size=float(bet_size),
             gross_return=float(gross_return),
             net_return=float(net_return),
             exit_reason=exit_reason,
@@ -175,6 +182,7 @@ class BacktestTradeSimulator:
         tids: np.ndarray,
         tpos: np.ndarray,
         y_true: Optional[np.ndarray] = None,
+        bet_sizes: Optional[np.ndarray] = None,
     ) -> List[BacktestTrade]:
         """Simulate non-overlapping per-ticker trades on sampled raw bars."""
         if not (len(y_pred) == len(tids) == len(tpos)):
@@ -188,15 +196,23 @@ class BacktestTradeSimulator:
                     "BacktestTradeSimulator.simulate expected y_true to match y_pred length, "
                     f"got {len(y_true)} and {len(y_pred)}."
                 )
+        if bet_sizes is not None:
+            if len(bet_sizes) != len(y_pred):
+                raise ValueError(
+                    "BacktestTradeSimulator.simulate expected bet_sizes to match y_pred length, "
+                    f"got {len(bet_sizes)} and {len(y_pred)}."
+                )
 
         candidates: List[BacktestTrade] = []
         for idx, signal_label in enumerate(np.asarray(y_pred, dtype=np.int64)):
             true_label = None if y_true is None else int(y_true[idx])
+            bet_size = 1.0 if bet_sizes is None else float(bet_sizes[idx])
             trade = self._candidate_trade(
                 signal_label=int(signal_label),
                 tid=int(tids[idx]),
                 tpos=int(tpos[idx]),
                 true_label=true_label,
+                bet_size=bet_size,
             )
             if trade is not None:
                 candidates.append(trade)
@@ -221,6 +237,7 @@ def compute_paper_trading_metrics(
     y_pred: np.ndarray,
     tids: np.ndarray,
     tpos: np.ndarray,
+    bet_sizes: Optional[np.ndarray] = None,
     simulator: BacktestTradeSimulator,
     initial_portfolio: float = 1.0,
     risk_free_rate: float = 0.0314,
@@ -232,11 +249,21 @@ def compute_paper_trading_metrics(
             "compute_paper_trading_metrics expected y_true, y_pred, tids, and tpos to have the same length, "
             f"got {len(y_true)}, {len(y_pred)}, {len(tids)}, and {len(tpos)}."
         )
+    if bet_sizes is not None and len(bet_sizes) != len(y_pred):
+        raise ValueError(
+            "compute_paper_trading_metrics expected bet_sizes to match y_pred length, "
+            f"got {len(bet_sizes)} and {len(y_pred)}."
+        )
 
     y_true = np.asarray(y_true, dtype=np.int64)
     y_pred = np.asarray(y_pred, dtype=np.int64)
     tids = np.asarray(tids, dtype=np.int64)
     tpos = np.asarray(tpos, dtype=np.int64)
+    bet_sizes = (
+        np.asarray(bet_sizes, dtype=np.float64)
+        if bet_sizes is not None
+        else np.ones(len(y_pred), dtype=np.float64)
+    )
 
     tp = int(np.sum((y_true == LABEL_UP) & (y_pred == LABEL_UP)))
     tn = int(np.sum((y_true == LABEL_DOWN) & (y_pred == LABEL_DOWN)))
@@ -246,10 +273,10 @@ def compute_paper_trading_metrics(
     # encoded as EXIT in y_pred while truth is still directional in canonical trade
     # space, so this can look artificially poor. Prefer acted/directional_acted metrics.
     accuracy_all_predictions = float(np.mean(y_true == y_pred)) if len(y_true) else 0.0
-    acted_mask = np.isin(y_pred, ACTED_LABELS)
+    acted_mask = np.isin(y_pred, ACTED_LABELS) & (bet_sizes > 0.0)
     actionable_truth_mask = np.isin(y_true, ACTED_LABELS)
     directional_acted_mask = acted_mask & actionable_truth_mask
-    abstained_mask = y_pred == 1
+    abstained_mask = y_pred == LABEL_EXIT
 
     acted_prediction_accuracy = (
         float(np.mean(y_true[acted_mask] == y_pred[acted_mask])) if np.any(acted_mask) else 0.0
@@ -263,10 +290,10 @@ def compute_paper_trading_metrics(
         float(np.mean(abstained_mask[actionable_truth_mask]) * 100.0) if np.any(actionable_truth_mask) else 0.0
     )
     acted_on_exit_truth_pct = (
-        float(np.mean(acted_mask[y_true == 1]) * 100.0) if np.any(y_true == 1) else 0.0
+        float(np.mean(acted_mask[y_true == LABEL_EXIT]) * 100.0) if np.any(y_true == LABEL_EXIT) else 0.0
     )
 
-    executed = simulator.simulate(y_pred=y_pred, tids=tids, tpos=tpos, y_true=y_true)
+    executed = simulator.simulate(y_pred=y_pred, tids=tids, tpos=tpos, y_true=y_true, bet_sizes=bet_sizes)
     gross_returns = np.asarray([trade.gross_return for trade in executed], dtype=np.float64)
     net_returns = np.asarray([trade.net_return for trade in executed], dtype=np.float64)
     executed_trade_hit_flags = np.asarray(
@@ -291,7 +318,7 @@ def compute_paper_trading_metrics(
     )
     n_trade_signals_raw = int(np.sum(acted_mask))
     n_trade_signals_skipped_overlap = int(max(n_trade_signals_raw - len(executed), 0))
-    transaction_cost_total_pct = float(len(executed) * 2.0 * float(simulator.transaction_cost) * 100.0)
+    transaction_cost_total_pct = float(np.sum([max(trade.gross_return - trade.net_return, 0.0) for trade in executed]) * 100.0)
 
     sample_times = []
     for tid, pos in zip(tids, tpos):

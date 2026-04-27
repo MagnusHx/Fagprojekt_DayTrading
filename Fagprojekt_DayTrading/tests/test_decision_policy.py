@@ -5,7 +5,13 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from kvant.ml_framework.train.decision_policy import LogisticMetaLabeler, meta_targets_from_predictions
+from kvant.labels import LABEL_DOWN, LABEL_EXIT, LABEL_UP
+from kvant.ml_framework.train.decision_policy import (
+    LogisticMetaLabeler,
+    kelly_bet_fraction,
+    meta_targets_from_predictions,
+    sized_trade_decisions,
+)
 from kvant.ml_framework.train.evaluator import EvalConfig, ExperimentEvaluator
 from kvant.ml_prepare_data.data_loading import PreparedExperiment
 
@@ -193,6 +199,30 @@ def test_meta_targets_follow_realized_return_of_predicted_side() -> None:
     out = meta_targets_from_predictions(pred_out=pred_out, store=store)
 
     np.testing.assert_array_equal(out, np.asarray([1, 1, 0], dtype=np.int64))
+
+
+def test_kelly_bet_fraction_clips_negative_edge_and_supports_fractional_kelly() -> None:
+    out = kelly_bet_fraction(
+        np.asarray([0.40, 0.60, 0.80], dtype=np.float64),
+        payoff_ratio=1.0,
+        fraction=0.5,
+    )
+
+    np.testing.assert_allclose(out, np.asarray([0.0, 0.1, 0.3], dtype=np.float64))
+
+
+def test_sized_trade_decisions_gate_on_threshold_and_kelly_edge() -> None:
+    y_trade, bet_size, signed_bet_size = sized_trade_decisions(
+        side_pred=np.asarray([0, 1, 1], dtype=np.int64),
+        take_proba=np.asarray([0.80, 0.55, 0.49], dtype=np.float64),
+        accept_threshold=0.5,
+        payoff_ratio=1.0,
+        fraction=1.0,
+    )
+
+    np.testing.assert_array_equal(y_trade, np.asarray([LABEL_DOWN, LABEL_UP, LABEL_EXIT], dtype=np.int64))
+    np.testing.assert_allclose(bet_size, np.asarray([0.6, 0.1, 0.0], dtype=np.float64))
+    np.testing.assert_allclose(signed_bet_size, np.asarray([-0.6, 0.1, 0.0], dtype=np.float64))
 
 
 def test_evaluator_fits_meta_labeler_and_reports_combined_metrics() -> None:

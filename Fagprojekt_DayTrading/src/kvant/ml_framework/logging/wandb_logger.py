@@ -324,8 +324,26 @@ class WandbLogger:
         self._define_default_metrics()
 
     def _define_default_metrics(self) -> None:
-        wandb.define_metric("global_epoch")
-        wandb.define_metric("epoch")
+        self._define_metric("global_epoch")
+        self._define_metric("epoch")
+
+    def _define_metric(self, name: str) -> None:
+        define_metric = getattr(self.run, "define_metric", None)
+        if callable(define_metric):
+            define_metric(name)
+            return
+        fallback = getattr(wandb, "define_metric", None)
+        if callable(fallback):
+            fallback(name)
+
+    def _config_update(self, payload: Dict[str, Any]) -> None:
+        run_config = getattr(self.run, "config", None)
+        if run_config is not None and hasattr(run_config, "update"):
+            run_config.update(payload, allow_val_change=True)
+            return
+        fallback = getattr(wandb, "config", None)
+        if fallback is not None and hasattr(fallback, "update"):
+            fallback.update(payload, allow_val_change=True)
 
     def child(self, *, namespace: str, step_offset: int = 0) -> WandbLogger:
         return WandbLogger(
@@ -342,9 +360,9 @@ class WandbLogger:
 
     def log_config(self, cfg: Any) -> None:
         if is_dataclass(cfg):
-            wandb.config.update(asdict(cfg), allow_val_change=True)
+            self._config_update(asdict(cfg))
         elif isinstance(cfg, dict):
-            wandb.config.update(cfg, allow_val_change=True)
+            self._config_update(cfg)
 
     def _qualify_key(self, key: str) -> str:
         if not self.namespace:
@@ -387,7 +405,11 @@ class WandbLogger:
         if not self._wandb_logging_enabled:
             return
         try:
-            wandb.log(self._qualify_metrics(metrics), step=step)
+            log_fn = getattr(self.run, "log", None)
+            if callable(log_fn):
+                log_fn(self._qualify_metrics(metrics), step=step)
+            else:
+                wandb.log(self._qualify_metrics(metrics), step=step)
         except Exception as exc:
             if optional:
                 self._optional_logging_enabled = False
@@ -428,6 +450,7 @@ class WandbLogger:
                 "interpretation",
                 "applicability",
                 "layer",
+                "label_space",
                 "legacy",
                 "primary_debug_metric",
                 "notes",
@@ -440,6 +463,7 @@ class WandbLogger:
                 row["interpretation"],
                 row["applicability"],
                 row["layer"],
+                row["label_space"],
                 row["legacy"],
                 row["primary_debug_metric"],
                 row["notes"],
@@ -452,7 +476,14 @@ class WandbLogger:
         self._log_static({"data/debug_dashboard_contract": dashboard_table})
 
         # label meanings
-        self.run.config.update({"label_meanings": self._label_meanings}, allow_val_change=True)
+        self._config_update(
+            {
+                "label_meanings": self._label_meanings,
+                "label_spaces": dict(getattr(exp.store, "label_spaces", {}) or {}),
+                "metric_pipeline": "side_model -> meta_label -> trade_decision -> execution -> economics",
+                "metric_contract_version": 2,
+            }
+        )
         label_table = wandb.Table(columns=["y", "meaning"])
         for y, meaning in self._label_meanings.items():
             label_table.add_data(int(y), str(meaning))
@@ -469,7 +500,7 @@ class WandbLogger:
         n_chart = min(self.per_ticker_chart_limit, len(tickers))
         self._tickers_to_chart = [f"{tickers[tid]} (tid={tid})" for tid in range(n_chart)]
         # Per-ticker epoch charts are intentionally disabled to keep runs lightweight.
-        self.run.config.update({"wandb_chart_first_n_tickers": 0}, allow_val_change=True)
+        self._config_update({"wandb_chart_first_n_tickers": 0})
 
         # split distribution table (static)
         # (Assumes ds.summary exists; if you truly want to use ds.display instead, tell me what it returns.)

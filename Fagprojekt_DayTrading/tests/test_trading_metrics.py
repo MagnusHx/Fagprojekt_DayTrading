@@ -155,6 +155,44 @@ def test_position_aware_backtest_allows_overlaps_across_tickers() -> None:
     assert executed[1].gross_return == pytest.approx(0.05)
 
 
+def test_position_aware_backtest_scales_returns_by_bet_size() -> None:
+    """Executed returns should scale with the requested Kelly position size."""
+    y_pred = np.asarray([2, 0, 2], dtype=np.int64)
+    metas = [
+        {
+            "bar_open_time": "2024-01-01T00:00:00+00:00",
+            "bar_close_time": "2024-01-01T12:00:00+00:00",
+            "pnl_fraction": 0.10,
+        },
+        {
+            "bar_open_time": "2024-01-02T00:00:00+00:00",
+            "bar_close_time": "2024-01-02T12:00:00+00:00",
+            "pnl_fraction": -0.05,
+        },
+        {
+            "bar_open_time": "2024-01-03T00:00:00+00:00",
+            "bar_close_time": "2024-01-03T12:00:00+00:00",
+            "pnl_fraction": 0.03,
+        },
+    ]
+    tids = np.asarray([0, 0, 0], dtype=np.int64)
+    bet_sizes = np.asarray([0.5, 0.25, 0.0], dtype=np.float64)
+
+    executed = simulate_position_aware_trades(
+        y_pred=y_pred,
+        metas=metas,
+        tids=tids,
+        bet_sizes=bet_sizes,
+        transaction_cost=0.0,
+    )
+
+    assert len(executed) == 2
+    assert executed[0].bet_size == pytest.approx(0.5)
+    assert executed[1].bet_size == pytest.approx(0.25)
+    assert executed[0].gross_return == pytest.approx(0.05)
+    assert executed[1].gross_return == pytest.approx(0.0125)
+
+
 def test_trade_decision_components_split_action_and_direction_confidence() -> None:
     """Action probability and directional confidence should be derived from up/down mass."""
     y_pred_proba = np.asarray(
@@ -314,6 +352,57 @@ def test_compute_paper_trading_metrics_exposes_abstention_debug_metrics_for_dire
     assert out["paper/transaction_cost_total_pct"] == pytest.approx(0.4)
     assert out["paper/long_n_executed_trades"] == 1
     assert out["paper/short_n_executed_trades"] == 1
+
+
+def test_compute_paper_trading_metrics_scales_portfolio_by_bet_size() -> None:
+    """Fractional Kelly sizing should scale both trade PnL and compounded portfolio value."""
+    y_true = np.asarray([2, 0, 2], dtype=np.int64)
+    y_pred = np.asarray([2, 0, 2], dtype=np.int64)
+    tids = np.asarray([0, 0, 0], dtype=np.int64)
+    tpos = np.asarray([0, 1, 2], dtype=np.int64)
+    bet_sizes = np.asarray([0.5, 0.25, 0.0], dtype=np.float64)
+    simulator = BacktestTradeSimulator(
+        market_data_store=_FakeMarketDataStore(
+            {
+                0: {
+                    "timestamp": np.asarray(
+                        [
+                            np.datetime64("2024-01-01T00:00:00"),
+                            np.datetime64("2024-01-02T00:00:00"),
+                            np.datetime64("2024-01-03T00:00:00"),
+                        ]
+                    ),
+                    "open": np.asarray([100.0, 100.0, 100.0], dtype=np.float32),
+                    "high": np.asarray([106.0, 100.0, 106.0], dtype=np.float32),
+                    "low": np.asarray([99.0, 94.0, 100.0], dtype=np.float32),
+                    "close": np.asarray([105.0, 95.0, 105.0], dtype=np.float32),
+                    "volume": np.asarray([1.0, 1.0, 1.0], dtype=np.float32),
+                }
+            }
+        ),
+        width_minutes=1439,
+        barrier_height=0.05,
+        transaction_cost=0.0,
+    )
+
+    out = compute_paper_trading_metrics(
+        y_true=y_true,
+        y_pred=y_pred,
+        tids=tids,
+        tpos=tpos,
+        bet_sizes=bet_sizes,
+        simulator=simulator,
+        initial_portfolio=1.0,
+        risk_free_rate=0.0,
+        days_per_year=3.0,
+    )
+
+    expected_final_portfolio = 1.025 * 1.0125
+    assert out["paper/n_trade_signals_raw"] == 2
+    assert out["paper/n_executed_trades"] == 2
+    assert out["paper/executed_trade_gross_return_avg_pct"] == pytest.approx(1.875)
+    assert out["paper/executed_trade_gross_return_total_pct"] == pytest.approx(3.75)
+    assert out["paper/annual_net_profit_loss_pct"] == pytest.approx((expected_final_portfolio - 1.0) * 100.0)
 
 
 def test_compute_paper_trading_metrics_handles_zero_executed_trades() -> None:
