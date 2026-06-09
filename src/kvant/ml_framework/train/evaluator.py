@@ -29,6 +29,16 @@ from .portfolio_simulator import compute_portfolio_metrics
 from .trading_metrics import compute_action_profit_stats, compute_profit_curve_over_trades
 
 
+_PAPER_METRICS_TO_KEEP = {
+    "paper/executed_trade_net_return_avg_pct",
+    "paper/executed_trade_net_return_total_pct",
+    "paper/transaction_cost_total_pct",
+    "paper/sharpe_ratio_annualized",
+    "paper/max_drawdown_pct",
+    "paper/n_executed_trades",
+}
+
+
 @dataclass(frozen=True)
 class EvalConfig:
     compute_per_ticker_accuracy: bool = True
@@ -37,7 +47,7 @@ class EvalConfig:
     compute_portfolio_metrics: bool = True
     initial_portfolio: float = 1.0
     portfolio_initial_cash: float = 10_000.0
-    portfolio_max_position_fraction: float = 0.05
+    portfolio_max_position_fraction: float = 0.02
     portfolio_max_total_exposure: float = 1.0
     portfolio_max_positions: int = 10
     transaction_cost: float = 0.001
@@ -50,7 +60,7 @@ class EvalConfig:
     meta_features: tuple[str, ...] = DEFAULT_META_FEATURES
     meta_random_state: int = 1337
     meta_accept_threshold: float = 0.5
-    kelly_fraction: float = 1.0
+    kelly_fraction: float = 0.25
     kelly_payoff_ratio: float = 1.0
 
 
@@ -125,10 +135,10 @@ class ExperimentEvaluator:
         *,
         step: Optional[int] = None,
         take_proba: np.ndarray,
+        detailed: bool = False,
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], np.ndarray, Optional[Dict[str, Any]]]:
         side_true = np.asarray(pred_out["y_true"], dtype=np.int64)
         side_pred = np.asarray(pred_out["y_pred"], dtype=np.int64)
-        y_pred_confidence = np.asarray(pred_out["y_pred_confidence"], dtype=np.float64)
         tid = np.asarray(pred_out["tid"], dtype=np.int64)
         tpos = np.asarray(pred_out["tpos"], dtype=np.int64)
         valid_side_mask = side_true >= 0
@@ -147,8 +157,6 @@ class ExperimentEvaluator:
         acted_mask = np.isin(y_trade, ACTED_LABELS) & (bet_size > 0.0)
         actionable_truth_mask = np.isin(event_true, ACTED_LABELS)
         directional_acted_mask = acted_mask & actionable_truth_mask
-        abstained_mask = y_trade == LABEL_EXIT
-
         metrics: Dict[str, Any] = {}
         per_ticker_rows: List[Dict[str, Any]] = []
 
@@ -157,16 +165,8 @@ class ExperimentEvaluator:
             side_pred[valid_side_mask],
             labels=self.cfg.labels,
         )
-        for k, v in cls.items():
-            metrics[f"{split}/{k}"] = v
-            metrics[f"{split}/cls/{k}"] = v
-
-        metrics[f"{split}/prediction_confidence_mean"] = (
-            float(np.mean(y_pred_confidence[valid_side_mask])) if np.any(valid_side_mask) else 0.0
-        )
-        metrics[f"{split}/prediction_confidence_median"] = (
-            float(np.median(y_pred_confidence[valid_side_mask])) if np.any(valid_side_mask) else 0.0
-        )
+        metrics[f"{split}/classification/accuracy"] = float(cls["accuracy"])
+        metrics[f"{split}/classification/f1_macro"] = float(cls.get("f1_macro", 0.0))
 
         meta_precision, meta_recall, meta_f1, _ = precision_recall_fscore_support(
             meta_true,
@@ -176,42 +176,26 @@ class ExperimentEvaluator:
             zero_division=0,
         )
         meta_metrics = {
-            "accept_threshold": float(self.cfg.meta_accept_threshold),
             "precision": float(meta_precision),
             "recall": float(meta_recall),
             "f1": float(meta_f1),
-            "accuracy": float(np.mean(meta_true == meta_pred)) if len(meta_true) else 0.0,
-            "take_probability_mean": float(np.mean(take_proba)) if len(take_proba) else 0.0,
-            "take_probability_median": float(np.median(take_proba)) if len(take_proba) else 0.0,
             "take_rate": float(np.mean(meta_pred == META_LABEL_TAKE)) if len(meta_pred) else 0.0,
-            "truth_take_rate": float(np.mean(meta_true == META_LABEL_TAKE)) if len(meta_true) else 0.0,
         }
         for key, value in meta_metrics.items():
             metrics[f"{split}/meta/{key}"] = value
 
         decision_metrics = {
-            "meta_accept_threshold": float(self.cfg.meta_accept_threshold),
-            "trade_signal_count": int(np.sum(acted_mask)),
             "trade_signal_rate": float(np.mean(acted_mask)) if len(y_trade) else 0.0,
-            "abstained_prediction_rate_pct": float(np.mean(abstained_mask) * 100.0) if len(y_trade) else 0.0,
-            "acted_prediction_accuracy": float(np.mean(event_true[acted_mask] == y_trade[acted_mask]))
-            if np.any(acted_mask)
-            else 0.0,
             "directional_acted_accuracy": float(
                 np.mean(event_true[directional_acted_mask] == y_trade[directional_acted_mask])
             )
             if np.any(directional_acted_mask)
-            else 0.0,
-            "actionable_truth_rate_pct": float(np.mean(actionable_truth_mask) * 100.0) if len(event_true) else 0.0,
-            "abstain_on_actionable_truth_pct": float(np.mean(abstained_mask[actionable_truth_mask]) * 100.0)
-            if np.any(actionable_truth_mask)
             else 0.0,
             "acted_on_exit_truth_pct": float(np.mean(acted_mask[event_true == LABEL_EXIT]) * 100.0)
             if np.any(event_true == LABEL_EXIT)
             else 0.0,
         }
         for key, value in decision_metrics.items():
-            metrics[f"{split}/{key}"] = value
             metrics[f"{split}/decision/{key}"] = value
 
         execution_metrics = {
@@ -232,7 +216,7 @@ class ExperimentEvaluator:
         per_tid_profit: Dict[int, Dict[str, Any]] = {}
         profit_curve: Optional[Dict[str, Any]] = None
         portfolio_curve: Optional[Dict[str, Any]] = None
-        if self.cfg.compute_profit_stats:
+        if detailed and self.cfg.compute_profit_stats:
             index = np.stack([tid, tpos], axis=1).astype(np.int32, copy=False)
             metas = self.store.metadata_for_index(index)
             per_tid_profit = compute_action_profit_stats(
@@ -265,64 +249,41 @@ class ExperimentEvaluator:
                     days_per_year=self.cfg.days_per_year,
                 )
                 for k, v in paper_metrics.items():
-                    metrics[f"{split}/{k}"] = v
-                    suffix = str(k).split("/", 1)[1] if "/" in str(k) else str(k)
-                    if suffix in {
-                        "acted_prediction_accuracy",
-                        "directional_acted_accuracy",
-                        "actionable_truth_rate_pct",
-                        "abstained_prediction_rate_pct",
-                        "abstain_on_actionable_truth_pct",
-                        "acted_on_exit_truth_pct",
-                    }:
-                        metrics[f"{split}/decision/{suffix}"] = v
-                    if suffix in {
-                        "n_trade_signals_raw",
-                        "n_trade_signals_skipped_overlap",
-                        "n_executed_trades",
-                        "share_time_active_pct",
-                        "executed_trade_hit_rate_pct",
-                    }:
-                        metrics[f"{split}/execution/{suffix}"] = v
-            if self.cfg.compute_portfolio_metrics:
-                portfolio_result = compute_portfolio_metrics(
-                    y_true=event_true,
-                    y_pred=y_trade,
-                    tids=tid,
-                    tpos=tpos,
-                    bet_sizes=bet_size,
-                    simulator=self.paper_trade_simulator,
-                    initial_cash=float(self.cfg.portfolio_initial_cash),
-                    max_position_fraction=float(self.cfg.portfolio_max_position_fraction),
-                    max_total_exposure=float(self.cfg.portfolio_max_total_exposure),
-                    max_positions=int(self.cfg.portfolio_max_positions),
-                    risk_free_rate=float(self.cfg.risk_free_rate),
-                    days_per_year=float(self.cfg.days_per_year),
-                )
-                for k, v in portfolio_result.metrics.items():
-                    metrics[f"{split}/{k}"] = v
-                    suffix = str(k).split("/", 1)[1] if "/" in str(k) else str(k)
-                    if suffix in {
-                        "n_trade_signals_raw",
-                        "n_candidate_trades",
-                        "n_executed_trades",
-                        "n_skipped_overlap",
-                        "n_skipped_budget",
-                        "max_concurrent_positions",
-                    }:
-                        metrics[f"{split}/execution/portfolio_{suffix}"] = v
+                    if k in _PAPER_METRICS_TO_KEEP:
+                        metrics[f"{split}/{k}"] = v
+
+        if self.cfg.compute_portfolio_metrics:
+            portfolio_result = compute_portfolio_metrics(
+                y_true=event_true,
+                y_pred=y_trade,
+                tids=tid,
+                tpos=tpos,
+                bet_sizes=bet_size,
+                simulator=self.paper_trade_simulator,
+                initial_cash=float(self.cfg.portfolio_initial_cash),
+                max_position_fraction=float(self.cfg.portfolio_max_position_fraction),
+                max_total_exposure=float(self.cfg.portfolio_max_total_exposure),
+                max_positions=int(self.cfg.portfolio_max_positions),
+                risk_free_rate=float(self.cfg.risk_free_rate),
+                days_per_year=float(self.cfg.days_per_year),
+            )
+            for k, v in portfolio_result.metrics.items():
+                metrics[f"{split}/{k}"] = v
+            if detailed:
                 portfolio_curve = {
                     "split": split,
                     "epoch": int(step) if step is not None else None,
                     **portfolio_result.equity_curve,
                 }
 
-        if self.cfg.compute_per_ticker_accuracy:
+        if detailed and self.cfg.compute_per_ticker_accuracy:
             for t in np.unique(tid):
                 mask = tid == t
                 n_t = int(mask.sum())
                 valid_t_mask = mask & valid_side_mask
-                acc_t = float(np.mean(side_true[valid_t_mask] == side_pred[valid_t_mask])) if np.any(valid_t_mask) else 0.0
+                acc_t = (
+                    float(np.mean(side_true[valid_t_mask] == side_pred[valid_t_mask])) if np.any(valid_t_mask) else 0.0
+                )
 
                 ticker = self.store.tickers_all[int(t)]
                 p = per_tid_profit.get(int(t), {})
@@ -355,11 +316,12 @@ class ExperimentEvaluator:
         loader: DataLoader,
         *,
         step: Optional[int] = None,
+        detailed: bool = True,
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], np.ndarray, Optional[Dict[str, Any]]]:
         pred_out = predict(model, loader, self.device)
         meta_model = self._fit_meta_model(pred_out)
         take_proba = meta_model.predict_take_proba(pred_out=pred_out, store=self.store)
-        return self._evaluate_pred_out(split, pred_out, step=step, take_proba=take_proba)
+        return self._evaluate_pred_out(split, pred_out, step=step, take_proba=take_proba, detailed=detailed)
 
     def evaluate_all(
         self,
@@ -367,12 +329,17 @@ class ExperimentEvaluator:
         loaders: Dict[str, Optional[DataLoader]],
         *,
         step: Optional[int] = None,
+        metric_splits: tuple[str, ...] = ("val",),
+        detailed: bool = False,
     ) -> Dict[str, Any]:
         if "train" not in loaders or loaders["train"] is None or len(loaders["train"].dataset) == 0:
             raise RuntimeError("Meta-label evaluation requires a non-empty train loader for fitting the meta model.")
 
         pred_out_by_split: Dict[str, Dict[str, Any]] = {}
+        required_splits = {"train", *metric_splits}
         for split, loader in loaders.items():
+            if split not in required_splits:
+                continue
             if loader is None or len(loader.dataset) == 0:
                 continue
             pred_out_by_split[split] = predict(model, loader, self.device)
@@ -385,21 +352,32 @@ class ExperimentEvaluator:
         portfolio_curves: List[Dict[str, Any]] = []
         rows_out: List[Dict[str, Any]] = []
 
-        for split, pred_out in pred_out_by_split.items():
+        for split in metric_splits:
+            pred_out = pred_out_by_split.get(split)
+            if pred_out is None:
+                continue
             take_proba = meta_model.predict_take_proba(pred_out=pred_out, store=self.store)
-            metrics, rows, cm, profit_curve = self._evaluate_pred_out(split, pred_out, step=step, take_proba=take_proba)
+            metrics, rows, cm, profit_curve = self._evaluate_pred_out(
+                split,
+                pred_out,
+                step=step,
+                take_proba=take_proba,
+                detailed=detailed,
+            )
             portfolio_curve = metrics.pop("_portfolio_curve", None)
             all_metrics.update(metrics)
             rows_out.extend(rows)
-            confusion_counts[split] = cm
+            if detailed:
+                confusion_counts[split] = cm
             if profit_curve is not None:
                 profit_curves.append(profit_curve)
             if portfolio_curve is not None:
                 portfolio_curves.append(portfolio_curve)
 
-        all_metrics["_per_ticker_rows"] = rows_out
-        all_metrics["_confusion_counts"] = confusion_counts
-        all_metrics["_profit_curves"] = profit_curves
-        all_metrics["_portfolio_curves"] = portfolio_curves
-        all_metrics["_confusion_class_names"] = ["Down barrier hit (y=0)", "Up barrier hit (y=1)"]
+        if detailed:
+            all_metrics["_per_ticker_rows"] = rows_out
+            all_metrics["_confusion_counts"] = confusion_counts
+            all_metrics["_profit_curves"] = profit_curves
+            all_metrics["_portfolio_curves"] = portfolio_curves
+            all_metrics["_confusion_class_names"] = ["Down barrier hit (y=0)", "Up barrier hit (y=1)"]
         return all_metrics

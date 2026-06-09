@@ -86,3 +86,19 @@ Suggested first grid:
 | Meta threshold | tune on validation, compare `0.45`, `0.50`, `0.55`, `0.60` |
 
 The project should aim to find a label/sampling regime where gross trade return is clearly positive before costs. If gross edge is weak, model and meta changes will mostly rearrange negative-cost trades.
+
+## Grid Runner
+
+The calibration grid has been set up in `src/kvant/ml_framework/scripts/run_experiment_grid.py`.
+
+Use these commands:
+
+```bash
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid plan
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid prepare --execute
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d --execute --max-runs 4
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid write-promising-template
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-resnet --execute
+```
+
+The runner is dry-run by default. It only executes commands when `--execute` is passed, and it writes the selected command list to `artifacts/run_debug/experiment_grid_plan.json`.

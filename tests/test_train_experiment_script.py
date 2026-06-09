@@ -7,9 +7,25 @@ from kvant.ml_framework.scripts.train_experiment import (
     _auto_wandb_name,
     _compatible_default_exp_dir,
     _compatible_default_manifest,
+    _device_status_message,
     _parse_meta_features,
     _should_run_cv,
+    parse_args,
 )
+import torch
+
+
+def test_recommended_training_defaults(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("sys.argv", ["train_experiment", "--exp-dir", str(tmp_path)])
+
+    args = parse_args()
+
+    assert args.epochs == 30
+    assert args.lr == 1e-3
+    assert args.full_eval_every == 3
+    assert args.kelly_fraction == 0.25
+    assert args.portfolio_max_position_fraction == 0.02
+    assert args.meta_accept_threshold == 0.5
 
 
 def test_baseline_preset_forces_conv1d_and_zero_cost() -> None:
@@ -147,3 +163,9 @@ def test_should_run_cv_respects_explicit_exp_dir_over_default_manifest(tmp_path)
     assert _should_run_cv(args, ["--exp-dir", str(exp_dir)]) is False
     assert _should_run_cv(args, ["--cv-manifest", str(manifest)]) is True
     assert _should_run_cv(args, []) is True
+
+
+def test_device_status_message_for_cpu() -> None:
+    out = _device_status_message(torch.device("cpu"))
+
+    assert out == "Using device: cpu (CUDA not available)"

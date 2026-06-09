@@ -20,6 +20,46 @@ from kvant.labels import (
 from kvant.ml_framework.train.metric_registry import dashboard_contract_rows, metric_inventory_rows
 
 
+_COMPACT_METRIC_SUFFIXES = {
+    "classification/accuracy",
+    "classification/f1_macro",
+    "meta/precision",
+    "meta/recall",
+    "meta/f1",
+    "meta/take_rate",
+    "decision/trade_signal_rate",
+    "decision/directional_acted_accuracy",
+    "decision/acted_on_exit_truth_pct",
+    "execution/n_trade_signals_raw",
+    "paper/executed_trade_net_return_avg_pct",
+    "paper/executed_trade_net_return_total_pct",
+    "paper/transaction_cost_total_pct",
+    "paper/sharpe_ratio_annualized",
+    "paper/max_drawdown_pct",
+    "paper/n_executed_trades",
+    "portfolio/total_return_pct",
+    "portfolio/cumulative_annual_profit_pct",
+    "portfolio/annualized_return_pct",
+    "portfolio/sharpe_ratio_annualized",
+    "portfolio/max_drawdown_pct",
+    "portfolio/average_trade_return_pct",
+    "portfolio/n_executed_trades",
+    "portfolio/average_exposure_pct",
+    "portfolio/n_skipped_budget",
+    "portfolio/transaction_cost_total",
+}
+
+
+def _is_compact_metric(key: str) -> bool:
+    """Return whether a scalar belongs in the compact default W&B view."""
+    if key in {"epoch", "global_epoch", "train/training/loss", "val/training/loss"}:
+        return True
+    if key.startswith("summary/"):
+        return True
+    parts = key.split("/", 1)
+    return len(parts) == 2 and parts[0] in {"train", "val", "test"} and parts[1] in _COMPACT_METRIC_SUFFIXES
+
+
 def _safe_int(x: Any, default: int = 0) -> int:
     try:
         return int(x)
@@ -102,12 +142,15 @@ def _parse_ts(x: Any) -> pd.Timestamp | None:
     return ts
 
 
-def _plot_split_class_balance(split_stats: Dict[str, dict], class_ids: tuple[int, ...], class_names: List[str]) -> plt.Figure:
+def _plot_split_class_balance(
+    split_stats: Dict[str, dict], class_ids: tuple[int, ...], class_names: List[str]
+) -> plt.Figure:
     splits = [s for s in ["train", "val", "test"] if s in split_stats]
     x = np.arange(len(splits))
 
     counts = np.array(
-        [[int((split_stats[s].get("y_counts", {}) or {}).get(c, 0)) for s in splits] for c in class_ids], dtype=np.float64
+        [[int((split_stats[s].get("y_counts", {}) or {}).get(c, 0)) for s in splits] for c in class_ids],
+        dtype=np.float64,
     )
     totals = counts.sum(axis=0, keepdims=True)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -224,10 +267,7 @@ def _plot_top_ticker_class_balance(
         return fig
 
     tickers = [str(r["ticker"]) for r in ranked]
-    class_counts = [
-        np.array([int(r.get(f"y_count_{label}", 0)) for r in ranked], dtype=float)
-        for label in class_ids
-    ]
+    class_counts = [np.array([int(r.get(f"y_count_{label}", 0)) for r in ranked], dtype=float) for label in class_ids]
     total = np.maximum(np.sum(class_counts, axis=0), 1.0)
 
     bottom = np.zeros(len(ranked), dtype=float)
@@ -301,6 +341,7 @@ class WandbLogger:
         manage_run: bool = True,
         enable_optional_media: bool = False,
         per_ticker_chart_limit: int = 0,
+        compact_metrics: bool = True,
         **init_kwargs,
     ):
         self.run = run or wandb.init(project=project, name=name, config=config or {}, **init_kwargs)
@@ -310,6 +351,7 @@ class WandbLogger:
         self.manage_run = bool(manage_run)
         self.enable_optional_media = bool(enable_optional_media)
         self.per_ticker_chart_limit = max(0, int(per_ticker_chart_limit))
+        self.compact_metrics = bool(compact_metrics)
         self._wandb_logging_enabled = True
         self._optional_logging_enabled = bool(enable_optional_media)
         self._warned_messages: set[str] = set()
@@ -356,6 +398,7 @@ class WandbLogger:
             manage_run=False,
             enable_optional_media=self.enable_optional_media,
             per_ticker_chart_limit=self.per_ticker_chart_limit,
+            compact_metrics=self.compact_metrics,
         )
 
     def log_config(self, cfg: Any) -> None:
@@ -570,15 +613,27 @@ class WandbLogger:
 
         if self.enable_optional_media:
             fig = _plot_split_class_balance(split_stats, self._class_ids, self._class_names)
-            self._wandb_log({"charts/data/class_balance_by_split": wandb.Image(fig)}, step=self._normalize_step(self._SETUP_STEP), optional=True)
+            self._wandb_log(
+                {"charts/data/class_balance_by_split": wandb.Image(fig)},
+                step=self._normalize_step(self._SETUP_STEP),
+                optional=True,
+            )
             plt.close(fig)
 
             fig = _plot_split_time_ranges(split_stats)
-            self._wandb_log({"charts/data/split_time_ranges": wandb.Image(fig)}, step=self._normalize_step(self._SETUP_STEP), optional=True)
+            self._wandb_log(
+                {"charts/data/split_time_ranges": wandb.Image(fig)},
+                step=self._normalize_step(self._SETUP_STEP),
+                optional=True,
+            )
             plt.close(fig)
 
             fig = _plot_split_expansion(split_stats)
-            self._wandb_log({"charts/data/split_expansion": wandb.Image(fig)}, step=self._normalize_step(self._SETUP_STEP), optional=True)
+            self._wandb_log(
+                {"charts/data/split_expansion": wandb.Image(fig)},
+                step=self._normalize_step(self._SETUP_STEP),
+                optional=True,
+            )
             plt.close(fig)
 
             fig = _plot_top_ticker_class_balance(
@@ -657,13 +712,17 @@ class WandbLogger:
             metrics.setdefault("global_epoch", int(step))
 
         # log scalars
+        if self.compact_metrics:
+            metrics = {key: value for key, value in metrics.items() if _is_compact_metric(str(key))}
         self._wandb_log(metrics, step=step, optional=False)
 
         if step is None:
             return
 
+        log_detailed_artifacts = not self.compact_metrics or self._is_best_namespace()
+
         # confusion matrices (graphical heatmaps)
-        if isinstance(confusion_counts, dict):
+        if log_detailed_artifacts and isinstance(confusion_counts, dict):
             class_names = list(confusion_class_names) if confusion_class_names else self._class_names
             for split, cm in confusion_counts.items():
                 if cm is None:
@@ -675,17 +734,13 @@ class WandbLogger:
                 )
                 self._wandb_log({f"charts/confusion_matrix/{split}": wandb.Image(fig)}, step=step, optional=False)
                 self._wandb_log(
-                    {
-                        f"perf/confusion_matrix_normalized/{split}": _normalized_confusion_table(
-                            np.asarray(cm)
-                        )
-                    },
+                    {f"perf/confusion_matrix_normalized/{split}": _normalized_confusion_table(np.asarray(cm))},
                     step=step,
                     optional=False,
                 )
                 plt.close(fig)
 
-        if isinstance(profit_curves, list):
+        if log_detailed_artifacts and isinstance(profit_curves, list):
             for curve in profit_curves:
                 split = str(curve.get("split", "unknown"))
                 trade_numbers = curve.get("trade_number", [])
@@ -712,7 +767,7 @@ class WandbLogger:
                     optional=False,
                 )
 
-        if isinstance(portfolio_curves, list):
+        if log_detailed_artifacts and isinstance(portfolio_curves, list):
             for curve in portfolio_curves:
                 split = str(curve.get("split", "unknown"))
                 timestamps = curve.get("timestamp", [])
@@ -723,9 +778,7 @@ class WandbLogger:
                 if not timestamps or not equity:
                     continue
 
-                table = wandb.Table(
-                    columns=["step", "timestamp", "equity", "cash", "exposure_pct", "open_positions"]
-                )
+                table = wandb.Table(columns=["step", "timestamp", "equity", "cash", "exposure_pct", "open_positions"])
                 for idx, (timestamp, eq, ca, ex, op) in enumerate(
                     zip(timestamps, equity, cash, exposure_pct, open_positions),
                     start=1,

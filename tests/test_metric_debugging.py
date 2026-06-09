@@ -41,7 +41,9 @@ class _IndexLogitModel(torch.nn.Module):
 
 
 class _FakeStore:
-    def __init__(self, *, tickers_all: list[str], metadata: dict[tuple[int, int], dict | None], market_data: dict[int, dict]):
+    def __init__(
+        self, *, tickers_all: list[str], metadata: dict[tuple[int, int], dict | None], market_data: dict[int, dict]
+    ):
         self.tickers_all = list(tickers_all)
         self._metadata = dict(metadata)
         self._market_data = dict(market_data)
@@ -72,7 +74,9 @@ class _FakeStore:
         }
 
 
-def _market_data_from_times(times: list[str], *, opens: list[float], highs: list[float], lows: list[float], closes: list[float]):
+def _market_data_from_times(
+    times: list[str], *, opens: list[float], highs: list[float], lows: list[float], closes: list[float]
+):
     return {
         "timestamp": np.asarray([np.datetime64(t) for t in times]),
         "open": np.asarray(opens, dtype=np.float32),
@@ -88,17 +92,32 @@ def test_evaluator_logs_semantic_metric_groups_for_side_and_meta_pipeline() -> N
     loader = DataLoader(dataset, batch_size=3, shuffle=False)
     model = _IndexLogitModel(
         logits=[
-            [3.0, 0.1],   # down
-            [0.1, 3.0],   # up
-            [0.0, 0.0],   # exit row still gets a side prediction
+            [3.0, 0.1],  # down
+            [0.1, 3.0],  # up
+            [0.0, 0.0],  # exit row still gets a side prediction
         ]
     )
     store = _FakeStore(
         tickers_all=["AAA"],
         metadata={
-            (0, 0): {"label": 0, "bar_open_time": "2024-01-01T00:00:00+00:00", "bar_close_time": "2024-01-02T00:00:00+00:00", "pnl_fraction": 0.05},
-            (0, 1): {"label": 2, "bar_open_time": "2024-01-02T00:00:00+00:00", "bar_close_time": "2024-01-03T00:00:00+00:00", "pnl_fraction": 0.05},
-            (0, 2): {"label": 2, "bar_open_time": "2024-01-03T00:00:00+00:00", "bar_close_time": "2024-01-04T00:00:00+00:00", "pnl_fraction": 0.05},
+            (0, 0): {
+                "label": 0,
+                "bar_open_time": "2024-01-01T00:00:00+00:00",
+                "bar_close_time": "2024-01-02T00:00:00+00:00",
+                "pnl_fraction": 0.05,
+            },
+            (0, 1): {
+                "label": 2,
+                "bar_open_time": "2024-01-02T00:00:00+00:00",
+                "bar_close_time": "2024-01-03T00:00:00+00:00",
+                "pnl_fraction": 0.05,
+            },
+            (0, 2): {
+                "label": 2,
+                "bar_open_time": "2024-01-03T00:00:00+00:00",
+                "bar_close_time": "2024-01-04T00:00:00+00:00",
+                "pnl_fraction": 0.05,
+            },
         },
         market_data={
             0: _market_data_from_times(
@@ -123,15 +142,16 @@ def test_evaluator_logs_semantic_metric_groups_for_side_and_meta_pipeline() -> N
 
     metrics, rows, cm, profit_curve = evaluator.evaluate_split("test", model, loader, step=1)
 
-    assert metrics["test/accuracy"] == metrics["test/cls/accuracy"]
-    assert metrics["test/f1_macro"] == metrics["test/cls/f1_macro"]
-    assert metrics["test/meta/accept_threshold"] == 0.6
+    assert metrics["test/classification/accuracy"] >= 0.0
+    assert metrics["test/classification/f1_macro"] >= 0.0
     assert metrics["test/meta/f1"] >= 0.0
-    assert metrics["test/decision/abstained_prediction_rate_pct"] >= 0.0
-    assert metrics["test/decision/acted_prediction_accuracy"] >= 0.0
     assert metrics["test/decision/directional_acted_accuracy"] >= 0.0
+    assert metrics["test/decision/trade_signal_rate"] >= 0.0
     assert metrics["test/execution/n_trade_signals_raw"] >= 0
     assert metrics["test/paper/n_executed_trades"] >= 0
+    assert "test/accuracy" not in metrics
+    assert "test/meta/accuracy" not in metrics
+    assert "test/paper/tp" not in metrics
     assert cm.shape == (2, 2)
     assert isinstance(rows, list)
     assert profit_curve is not None
@@ -142,17 +162,32 @@ def test_evaluator_confusion_matrix_stays_binary_while_backtest_uses_event_label
     loader = DataLoader(dataset, batch_size=3, shuffle=False)
     model = _IndexLogitModel(
         logits=[
-            [3.0, 0.1],   # down
-            [0.1, 3.0],   # exit row gets an up proposal
-            [0.0, 3.0],   # up
+            [3.0, 0.1],  # down
+            [0.1, 3.0],  # exit row gets an up proposal
+            [0.0, 3.0],  # up
         ]
     )
     store = _FakeStore(
         tickers_all=["AAA"],
         metadata={
-            (0, 0): {"label": 0, "bar_open_time": "2024-01-01T00:00:00+00:00", "bar_close_time": "2024-01-02T00:00:00+00:00", "pnl_fraction": 0.05},
-            (0, 1): {"label": 1, "bar_open_time": "2024-01-02T00:00:00+00:00", "bar_close_time": "2024-01-03T00:00:00+00:00", "pnl_fraction": 0.00},
-            (0, 2): {"label": 2, "bar_open_time": "2024-01-03T00:00:00+00:00", "bar_close_time": "2024-01-04T00:00:00+00:00", "pnl_fraction": 0.05},
+            (0, 0): {
+                "label": 0,
+                "bar_open_time": "2024-01-01T00:00:00+00:00",
+                "bar_close_time": "2024-01-02T00:00:00+00:00",
+                "pnl_fraction": 0.05,
+            },
+            (0, 1): {
+                "label": 1,
+                "bar_open_time": "2024-01-02T00:00:00+00:00",
+                "bar_close_time": "2024-01-03T00:00:00+00:00",
+                "pnl_fraction": 0.00,
+            },
+            (0, 2): {
+                "label": 2,
+                "bar_open_time": "2024-01-03T00:00:00+00:00",
+                "bar_close_time": "2024-01-04T00:00:00+00:00",
+                "pnl_fraction": 0.05,
+            },
         },
         market_data={
             0: _market_data_from_times(
@@ -243,7 +278,7 @@ def test_wandb_logger_does_not_require_api_client(monkeypatch) -> None:
     fake_wandb = _FakeWandb()
     monkeypatch.setattr(wandb_logger_module, "wandb", fake_wandb)
 
-    logger = WandbLogger(project="proj", name="run", api_timeout=1)
+    logger = WandbLogger(project="proj", name="run", api_timeout=1, compact_metrics=False)
 
     assert logger.run.project == "proj"
 
@@ -256,7 +291,12 @@ class _FakeSummaryDataset:
     def summary(self, display=False):
         y_counts = {label: 2 for label in self._class_ids}
         return {
-            "overall": {"n": sum(y_counts.values()), "first_ts": "2024-01-01T00:00:00+00:00", "last_ts": "2024-01-02T00:00:00+00:00", "y_counts": y_counts},
+            "overall": {
+                "n": sum(y_counts.values()),
+                "first_ts": "2024-01-01T00:00:00+00:00",
+                "last_ts": "2024-01-02T00:00:00+00:00",
+                "y_counts": y_counts,
+            },
             "per_ticker": {
                 self._ticker: {
                     "tid": 0,
@@ -273,7 +313,7 @@ def test_wandb_logger_respects_label_regime_for_inventory_and_confusion(monkeypa
     fake_wandb = _FakeWandb()
     monkeypatch.setattr(wandb_logger_module, "wandb", fake_wandb)
 
-    logger = WandbLogger(project="proj", name="run", api_timeout=1)
+    logger = WandbLogger(project="proj", name="run", api_timeout=1, compact_metrics=False)
     exp = SimpleNamespace(
         exp_dir=tmp_path / "exp",
         store=SimpleNamespace(
@@ -292,11 +332,15 @@ def test_wandb_logger_respects_label_regime_for_inventory_and_confusion(monkeypa
     logger.setup(exp=exp, loaders=loaders)
     logger.log({"epoch": 1, "_confusion_counts": {"test": np.asarray([[2, 1], [0, 3]], dtype=np.int64)}}, step=1)
 
-    inventory_tables = [payload["data/metric_inventory"] for payload, _ in fake_wandb.logged if "data/metric_inventory" in payload]
+    inventory_tables = [
+        payload["data/metric_inventory"] for payload, _ in fake_wandb.logged if "data/metric_inventory" in payload
+    ]
     assert inventory_tables
     assert len(inventory_tables[0].rows) > 10
 
-    label_tables = [payload["data/label_meanings"] for payload, _ in fake_wandb.logged if "data/label_meanings" in payload]
+    label_tables = [
+        payload["data/label_meanings"] for payload, _ in fake_wandb.logged if "data/label_meanings" in payload
+    ]
     assert label_tables
     assert len(label_tables[0].rows) == 2
 
@@ -313,7 +357,9 @@ def test_wandb_logger_skips_optional_per_ticker_media_by_default(monkeypatch, tm
     fake_wandb = _FakeWandb()
     monkeypatch.setattr(wandb_logger_module, "wandb", fake_wandb)
 
-    logger = WandbLogger(project="proj", name="run", api_timeout=1, enable_optional_media=False, per_ticker_chart_limit=5)
+    logger = WandbLogger(
+        project="proj", name="run", api_timeout=1, enable_optional_media=False, per_ticker_chart_limit=5
+    )
     logger.log(
         {
             "epoch": 1,
@@ -399,7 +445,9 @@ def test_wandb_logger_degrades_gracefully_when_optional_media_fails(monkeypatch,
     fake_wandb = _FailingOptionalWandb()
     monkeypatch.setattr(wandb_logger_module, "wandb", fake_wandb)
 
-    logger = WandbLogger(project="proj", name="run", api_timeout=1, enable_optional_media=True, per_ticker_chart_limit=1)
+    logger = WandbLogger(
+        project="proj", name="run", api_timeout=1, enable_optional_media=True, per_ticker_chart_limit=1
+    )
     logger._tickers_to_chart = ["AAA (tid=0)"]
     logger.log(
         {

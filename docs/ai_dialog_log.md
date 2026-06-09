@@ -7,6 +7,7 @@ Purpose: record important AI-assisted project discussions in a readable way. Thi
 | Date | Tool / participant | Topic | Useful output | Human/team decision | Follow-up |
 | --- | --- | --- | --- | --- | --- |
 | 2026-04-27 | Codex | Backtest realism and portfolio balance | Suggested replacing trade-only compounding as the final economic claim with a cash/exposure-constrained portfolio simulator while keeping paper metrics as diagnostics. | Implemented portfolio-account metrics, W&B equity-curve logging, and documentation updates. | Compare `portfolio/*` and `paper/*` on the next corrected-fold experiment. |
+| 2026-04-28 | Codex | Latest experiment and next grid | Analysed the latest ResNet-LSTM fixed-CUSUM run and suggested calibrating CUSUM/barrier/meta thresholds before scaling architecture. | Set up a dry-run-first grid runner with Conv1D as the first model and ResNet-LSTM only for promising configurations. | Run the preparation grid, execute Conv1D batches, then fill `reports/promising_grid_configs.json`. |
 
 ## Entry Template
 

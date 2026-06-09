@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from kvant.labels import ACTED_LABELS, LABEL_DOWN, LABEL_UP
+from kvant.labels import LABEL_DOWN, LABEL_UP
 
 from .backtest import BacktestTrade, BacktestTradeSimulator
 
@@ -81,21 +81,14 @@ def _curve_metrics(
     realized_trade_pnl: list[float],
     realized_trade_return: list[float],
     transaction_cost_total: float,
-    n_trade_signals_raw: int,
-    n_candidate_trades: int,
     n_skipped_budget: int,
     days_per_year: float,
     risk_free_rate: float,
 ) -> Dict[str, Any]:
     equity = np.asarray(equity_curve["equity"], dtype=np.float64)
     exposure_pct = np.asarray(equity_curve["exposure_pct"], dtype=np.float64)
-    open_positions = np.asarray(equity_curve["open_positions"], dtype=np.float64)
     final_balance = float(equity[-1]) if len(equity) else float(initial_cash)
-    total_return_pct = (
-        float((final_balance / float(initial_cash) - 1.0) * 100.0)
-        if float(initial_cash) > 0.0
-        else 0.0
-    )
+    total_return_pct = float((final_balance / float(initial_cash) - 1.0) * 100.0) if float(initial_cash) > 0.0 else 0.0
 
     timestamps = equity_curve.get("timestamp", [])
     if timestamps:
@@ -106,9 +99,18 @@ def _curve_metrics(
         daily = pd.concat([pd.Series([float(initial_cash)], index=[daily.index.min() - pd.Timedelta(days=1)]), daily])
         daily_returns = daily.pct_change().fillna(0.0)
         n_days = max(int(len(daily)), 1)
+        year_end_equity = daily.groupby(daily.index.year).last()
+        year_start_equity = pd.Series(
+            [float(initial_cash), *year_end_equity.iloc[:-1].tolist()],
+            index=year_end_equity.index,
+            dtype=np.float64,
+        )
+        annual_profit_pct = (year_end_equity / year_start_equity - 1.0) * 100.0
+        cumulative_annual_profit_pct = float(annual_profit_pct.sum())
     else:
         daily_returns = pd.Series([0.0], dtype=np.float64)
         n_days = 1
+        cumulative_annual_profit_pct = 0.0
 
     annual_return_pct = (
         ((final_balance / float(initial_cash)) ** (float(days_per_year) / float(n_days)) - 1.0) * 100.0
@@ -124,46 +126,23 @@ def _curve_metrics(
         if daily_std > 0.0
         else 0.0
     )
-    downside = daily_returns[daily_returns < risk_free_daily] - risk_free_daily
-    downside_std = float(downside.std(ddof=0)) if len(downside) else 0.0
-    sortino = (
-        float(np.sqrt(float(days_per_year)) * ((daily_returns.mean() - risk_free_daily) / downside_std))
-        if downside_std > 0.0
-        else 0.0
-    )
-
     running_peak = np.maximum.accumulate(np.maximum(equity, 1e-12))
     max_drawdown_pct = float(np.max((running_peak - equity) / running_peak) * 100.0) if len(equity) else 0.0
 
     pnl = np.asarray(realized_trade_pnl, dtype=np.float64)
-    gains = float(np.sum(pnl[pnl > 0.0])) if len(pnl) else 0.0
-    losses = float(-np.sum(pnl[pnl < 0.0])) if len(pnl) else 0.0
-    profit_factor = float(gains / losses) if losses > 0.0 else (float("inf") if gains > 0.0 else 0.0)
     returns = np.asarray(realized_trade_return, dtype=np.float64)
 
     return {
-        "portfolio/final_balance": float(final_balance),
         "portfolio/total_return_pct": float(total_return_pct),
+        "portfolio/cumulative_annual_profit_pct": float(cumulative_annual_profit_pct),
         "portfolio/annualized_return_pct": float(annual_return_pct),
         "portfolio/max_drawdown_pct": float(max_drawdown_pct),
         "portfolio/sharpe_ratio_annualized": float(sharpe),
-        "portfolio/sortino_ratio_annualized": float(sortino),
-        "portfolio/profit_factor": float(profit_factor),
-        "portfolio/win_rate_pct": float(np.mean(pnl > 0.0) * 100.0) if len(pnl) else 0.0,
         "portfolio/average_trade_return_pct": float(np.mean(returns) * 100.0) if len(returns) else 0.0,
-        "portfolio/average_trade_pnl": float(np.mean(pnl)) if len(pnl) else 0.0,
-        "portfolio/largest_loss": float(np.min(pnl)) if len(pnl) else 0.0,
-        "portfolio/max_concurrent_positions": int(np.max(open_positions)) if len(open_positions) else 0,
         "portfolio/average_exposure_pct": float(np.mean(exposure_pct)) if len(exposure_pct) else 0.0,
-        "portfolio/time_in_market_pct": float(np.mean(open_positions > 0.0) * 100.0) if len(open_positions) else 0.0,
-        "portfolio/cash_utilization_pct": float(np.mean(exposure_pct)) if len(exposure_pct) else 0.0,
         "portfolio/transaction_cost_total": float(transaction_cost_total),
-        "portfolio/n_trade_signals_raw": int(n_trade_signals_raw),
-        "portfolio/n_candidate_trades": int(n_candidate_trades),
         "portfolio/n_executed_trades": int(len(pnl)),
-        "portfolio/n_skipped_overlap": int(max(n_trade_signals_raw - n_candidate_trades, 0)),
         "portfolio/n_skipped_budget": int(n_skipped_budget),
-        "portfolio/n_days": int(n_days),
     }
 
 
@@ -199,15 +178,11 @@ def compute_portfolio_metrics(
     tids = np.asarray(tids, dtype=np.int64)
     tpos = np.asarray(tpos, dtype=np.int64)
     bet_sizes = (
-        np.asarray(bet_sizes, dtype=np.float64)
-        if bet_sizes is not None
-        else np.ones(len(y_pred), dtype=np.float64)
+        np.asarray(bet_sizes, dtype=np.float64) if bet_sizes is not None else np.ones(len(y_pred), dtype=np.float64)
     )
     if len(bet_sizes) != len(y_pred):
         raise ValueError("bet_sizes must match y_pred length.")
 
-    acted_mask = np.isin(y_pred, ACTED_LABELS) & (bet_sizes > 0.0)
-    n_trade_signals_raw = int(np.sum(acted_mask))
     candidate_trades = simulator.simulate(y_pred=y_pred, tids=tids, tpos=tpos, y_true=y_true, bet_sizes=bet_sizes)
     entries_by_time: dict[pd.Timestamp, list[BacktestTrade]] = {}
     exits_by_time: dict[pd.Timestamp, list[BacktestTrade]] = {}
@@ -318,8 +293,6 @@ def compute_portfolio_metrics(
         realized_trade_pnl=realized_trade_pnl,
         realized_trade_return=realized_trade_return,
         transaction_cost_total=float(transaction_cost_total),
-        n_trade_signals_raw=n_trade_signals_raw,
-        n_candidate_trades=len(candidate_trades),
         n_skipped_budget=n_skipped_budget,
         days_per_year=float(days_per_year),
         risk_free_rate=float(risk_free_rate),

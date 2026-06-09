@@ -205,7 +205,52 @@ class PreparedStore:
             )
         return key
 
+    def _prepared_last_recent_return_values(self, tids: np.ndarray, tpos: np.ndarray) -> np.ndarray:
+        out = np.zeros(len(tids), dtype=np.float32)
+        for i, (tid, pos) in enumerate(zip(tids, tpos)):
+            row_idx = int(pos) - 1
+            if row_idx < 0:
+                raise RuntimeError(
+                    f"Cannot read prepared_last:recent_return for ticker id {int(tid)} at position {int(pos)}."
+                )
+
+            market_data = self.require_market_data(int(tid))
+            close = np.asarray(market_data["close"], dtype=np.float64)
+            if row_idx >= len(close):
+                raise RuntimeError(
+                    f"Prepared market data for ticker {self.ticker(int(tid))} is shorter than features at row {row_idx}."
+                )
+            if row_idx == 0:
+                out[i] = 0.0
+                continue
+
+            prev_close = float(close[row_idx - 1])
+            curr_close = float(close[row_idx])
+            if prev_close <= 0.0 or curr_close <= 0.0:
+                out[i] = 0.0
+                continue
+            out[i] = float(np.log(curr_close / prev_close))
+        return out
+
     def prepared_last_feature_values(self, tids: np.ndarray, tpos: np.ndarray, feature_name: str) -> np.ndarray:
+        feature_name = str(feature_name).strip()
+        if feature_name in {"recent_return", "recent_return_feature"}:
+            try:
+                feature_idx = self.feature_index(feature_name)
+            except RuntimeError as exc:
+                if "could not be resolved" not in str(exc):
+                    raise
+                return self._prepared_last_recent_return_values(tids=tids, tpos=tpos)
+            out = np.empty(len(tids), dtype=np.float32)
+            for i, (tid, pos) in enumerate(zip(tids, tpos)):
+                row_idx = int(pos) - 1
+                if row_idx < 0:
+                    raise RuntimeError(
+                        f"Cannot read prepared_last:{feature_name} for ticker id {int(tid)} at position {int(pos)}."
+                    )
+                out[i] = float(self._features[int(tid)][row_idx, feature_idx])
+            return out
+
         feature_idx = self.feature_index(feature_name)
         out = np.empty(len(tids), dtype=np.float32)
         for i, (tid, pos) in enumerate(zip(tids, tpos)):

@@ -197,9 +197,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--exp-dir", type=Path, required=False, default=default_exp_dir)
     p.add_argument("--cv-manifest", type=Path, required=False, default=default_cv_manifest)
-    p.add_argument("--epochs", type=int, default=10)
+    p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--seed", type=int, default=1337)
-    p.add_argument("--lr", type=float, default=5e-3)
+    p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight-decay", type=float, default=5e-5)
     p.add_argument(
         "--baseline",
@@ -218,15 +218,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wandb-project", type=str, default=default_project)
     p.add_argument("--wandb-name", type=str, default=None)
     p.add_argument("--wandb-api-timeout", type=int, default=29)
+    p.add_argument(
+        "--full-eval-every",
+        type=int,
+        default=3,
+        help="Run expensive full evaluation every N epochs; epoch 1 and the final epoch are always evaluated.",
+    )
     p.add_argument("--no-return-stats", action="store_true")
     p.add_argument("--pipeline-stage", type=str, choices=("primary_side",), default="primary_side")
     p.add_argument("--initial-portfolio", type=float, default=1.0)
     p.add_argument("--portfolio-initial-cash", type=float, default=10_000.0)
-    p.add_argument("--portfolio-max-position-fraction", type=float, default=0.05)
+    p.add_argument("--portfolio-max-position-fraction", type=float, default=0.02)
     p.add_argument("--portfolio-max-total-exposure", type=float, default=1.0)
     p.add_argument("--portfolio-max-positions", type=int, default=10)
     p.add_argument("--transaction-cost", type=float, default=0.001)
-    p.add_argument("--kelly-fraction", type=float, default=1.0)
+    p.add_argument("--kelly-fraction", type=float, default=0.25)
     p.add_argument("--kelly-payoff-ratio", type=float, default=1.0)
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
@@ -288,6 +294,8 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("--portfolio-max-positions must be positive.")
     if args.train_batch_size <= 0 or args.eval_batch_size <= 0 or args.epochs <= 0:
         raise SystemExit("epochs and batch sizes must be positive.")
+    if args.full_eval_every <= 0:
+        raise SystemExit("--full-eval-every must be positive.")
     return args
 
 
@@ -300,6 +308,16 @@ def _model_kwargs(args: argparse.Namespace) -> dict:
         "lstm_layers": args.lstm_layers,
         "dropout": args.model_dropout,
     }
+
+
+def _device_status_message(device: torch.device) -> str:
+    """Build a human-readable runtime message for the selected torch device."""
+    if device.type != "cuda":
+        return "Using device: cpu (CUDA not available)"
+
+    device_index = device.index if device.index is not None else torch.cuda.current_device()
+    device_name = torch.cuda.get_device_name(device_index)
+    return f"Using device: cuda:{device_index} ({device_name})"
 
 
 def _save_best_checkpoint_bundle(
@@ -393,6 +411,8 @@ def _make_logger(
             "L": None,
             "train_batch_size": args.train_batch_size,
             "eval_batch_size": args.eval_batch_size,
+            "full_eval_every": getattr(args, "full_eval_every", 3),
+            "wandb_metric_mode": "compact",
             "class_weights": None,
             "pipeline_stage": args.pipeline_stage,
             "meta_model": "logreg",
@@ -411,6 +431,7 @@ def _make_logger(
         },
         enable_optional_media=args.wandb_optional_media,
         per_ticker_chart_limit=args.topk_ticker_plots,
+        compact_metrics=True,
     )
 
 
@@ -495,6 +516,7 @@ def run_single_fold(
             print("-" * 10, "\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(_device_status_message(device))
     model = create_model(
         model_name=args.model,
         n_features=exp.store.n_features,
@@ -526,6 +548,8 @@ def run_single_fold(
             "L": exp.L,
             "train_batch_size": args.train_batch_size,
             "eval_batch_size": args.eval_batch_size,
+            "full_eval_every": getattr(args, "full_eval_every", 3),
+            "wandb_metric_mode": "compact",
             "class_weights": w.tolist(),
             "n_classes": 2,
             "event_label_semantics": exp.label_semantics,
@@ -596,6 +620,7 @@ def run_single_fold(
             train_batch_size=args.train_batch_size,
             eval_batch_size=args.eval_batch_size,
             checkpoint_metric="val/meta/f1",
+            full_eval_every=getattr(args, "full_eval_every", 3),
         )
 
         out = trainer.fit(
@@ -622,6 +647,8 @@ def run_single_fold(
             model,
             {"train": dl_train_eval, "val": dl_val, "test": dl_test},
             step=args.epochs + 1,
+            metric_splits=("val", "test"),
+            detailed=True,
         )
         logger.child(namespace="best").log(best_metrics, step=args.epochs + 1)
         return float(out["best_metric"])

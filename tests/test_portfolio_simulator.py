@@ -3,7 +3,7 @@ import pytest
 
 from kvant.labels import LABEL_UP
 from kvant.ml_framework.train.backtest import BacktestTradeSimulator
-from kvant.ml_framework.train.portfolio_simulator import compute_portfolio_metrics
+from kvant.ml_framework.train.portfolio_simulator import _curve_metrics, compute_portfolio_metrics
 
 
 class _FakeMarketDataStore:
@@ -35,7 +35,9 @@ def _market(close: list[float]) -> dict[str, np.ndarray]:
     }
 
 
-def _simulator(market_data: dict[int, dict[str, np.ndarray]], *, transaction_cost: float = 0.0) -> BacktestTradeSimulator:
+def _simulator(
+    market_data: dict[int, dict[str, np.ndarray]], *, transaction_cost: float = 0.0
+) -> BacktestTradeSimulator:
     return BacktestTradeSimulator(
         market_data_store=_FakeMarketDataStore(market_data),
         width_minutes=1440,
@@ -58,8 +60,9 @@ def test_portfolio_balance_rises_for_profitable_long() -> None:
         risk_free_rate=0.0,
     )
 
-    assert result.metrics["portfolio/final_balance"] == pytest.approx(10_100.0)
+    assert result.equity_curve["equity"][-1] == pytest.approx(10_100.0)
     assert result.metrics["portfolio/total_return_pct"] == pytest.approx(1.0)
+    assert result.metrics["portfolio/cumulative_annual_profit_pct"] == pytest.approx(1.0)
     assert result.metrics["portfolio/n_executed_trades"] == 1
 
 
@@ -77,7 +80,7 @@ def test_portfolio_balance_rises_for_profitable_short() -> None:
         risk_free_rate=0.0,
     )
 
-    assert result.metrics["portfolio/final_balance"] == pytest.approx(10_100.0)
+    assert result.equity_curve["equity"][-1] == pytest.approx(10_100.0)
     assert result.metrics["portfolio/total_return_pct"] == pytest.approx(1.0)
     assert result.metrics["portfolio/n_executed_trades"] == 1
 
@@ -96,7 +99,7 @@ def test_portfolio_applies_entry_and_exit_transaction_costs() -> None:
         risk_free_rate=0.0,
     )
 
-    assert result.metrics["portfolio/final_balance"] == pytest.approx(9_980.0)
+    assert result.equity_curve["equity"][-1] == pytest.approx(9_980.0)
     assert result.metrics["portfolio/transaction_cost_total"] == pytest.approx(20.0)
     assert result.metrics["portfolio/total_return_pct"] == pytest.approx(-0.2)
 
@@ -115,7 +118,28 @@ def test_portfolio_skips_trade_when_exposure_budget_is_exhausted() -> None:
         risk_free_rate=0.0,
     )
 
-    assert result.metrics["portfolio/n_candidate_trades"] == 2
     assert result.metrics["portfolio/n_executed_trades"] == 1
     assert result.metrics["portfolio/n_skipped_budget"] == 1
-    assert result.metrics["portfolio/max_concurrent_positions"] == 1
+
+
+def test_cumulative_annual_profit_sums_each_calendar_year_return() -> None:
+    metrics = _curve_metrics(
+        initial_cash=100.0,
+        equity_curve={
+            "step": [0, 1, 2],
+            "timestamp": ["2024-12-31T00:00:00+00:00", "2025-12-31T00:00:00+00:00"],
+            "equity": [100.0, 110.0, 121.0],
+            "cash": [100.0, 110.0, 121.0],
+            "exposure_pct": [0.0, 0.0, 0.0],
+            "open_positions": [0, 0, 0],
+        },
+        realized_trade_pnl=[],
+        realized_trade_return=[],
+        transaction_cost_total=0.0,
+        n_skipped_budget=0,
+        days_per_year=365.0,
+        risk_free_rate=0.0,
+    )
+
+    assert metrics["portfolio/total_return_pct"] == pytest.approx(21.0)
+    assert metrics["portfolio/cumulative_annual_profit_pct"] == pytest.approx(20.0)

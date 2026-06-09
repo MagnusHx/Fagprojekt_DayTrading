@@ -18,12 +18,13 @@ The current workflow prepares walk-forward experiment folds from minute OHLCV da
 
 Training runs publish metrics in layer-specific namespaces:
 
-- `cls/*` for primary side-model learning behavior.
+- `training/*` for optimization and validation loss.
+- `classification/*` for primary side-model learning behavior.
 - `meta/*` for TAKE/PASS filtering quality.
 - `decision/*` for final acted and abstained predictions.
-- `execution/*` for signal counts, overlap suppression, and active time.
-- `paper/*` for diagnostic trade-level economics.
-- `portfolio/*` for cash, exposure, drawdown, final balance, and skipped-budget behavior.
+- `execution/*` for raw signal counts.
+- `paper/*` for reduced final-best-model trade diagnostics.
+- `portfolio/*` for return, summed calendar-year profit, exposure, drawdown, and account constraints.
 
 The portfolio equity curve is logged as `perf/portfolio_equity_curve/{split}` with a companion line chart at `charts/portfolio_equity/{split}`.
 

@@ -215,6 +215,39 @@ def test_logistic_meta_labeler_builds_enriched_default_feature_matrix(tmp_path) 
     np.testing.assert_allclose(X[:, 11], np.asarray([1.0, 1.0], dtype=np.float64))
 
 
+def test_logistic_meta_labeler_derives_recent_return_when_feature_is_not_persisted(tmp_path) -> None:
+    exp = _write_prepared_fixture(tmp_path, feature_names=["ewmstd_close_20b", "f1", "f2"])
+    ticker_dir = exp.exp_dir / "tickers" / "AAA"
+    market_data = np.asarray(
+        [
+            [100.0, 101.0, 99.0, 100.0, 1.0],
+            [100.0, 102.0, 99.0, 110.0, 1.0],
+            [110.0, 112.0, 109.0, 121.0, 1.0],
+            [121.0, 122.0, 120.0, 121.0, 1.0],
+            [121.0, 123.0, 120.0, 133.1, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    np.save(ticker_dir / "market_data.npy", market_data)
+    exp = PreparedExperiment(exp.exp_dir)
+    pred_out = {
+        "tid": np.asarray([0, 0], dtype=np.int64),
+        "tpos": np.asarray([2, 3], dtype=np.int64),
+        "y_pred": np.asarray([1, 0], dtype=np.int64),
+        "y_pred_proba": np.asarray([[0.2, 0.8], [0.55, 0.45]], dtype=np.float64),
+        "y_logits": np.asarray([[0.0, 2.0], [0.2, 0.1]], dtype=np.float64),
+        "y_embedding": np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64),
+    }
+    policy = LogisticMetaLabeler()
+
+    X = policy.build_feature_matrix(pred_out=pred_out, store=exp.store)
+
+    np.testing.assert_allclose(
+        X[:, 5],
+        np.asarray([np.log(110.0 / 100.0), np.log(121.0 / 110.0)], dtype=np.float64),
+    )
+
+
 def test_logistic_meta_labeler_requires_persisted_feature_names(tmp_path) -> None:
     exp = _write_prepared_fixture(tmp_path, feature_names=None)
     pred_out = {
@@ -317,9 +350,23 @@ def test_evaluator_fits_meta_labeler_and_reports_combined_metrics() -> None:
 
     metrics = evaluator.evaluate_all(model, {"train": train_loader, "val": val_loader, "test": test_loader}, step=1)
 
-    assert metrics["test/cls/accuracy"] >= 0.0
-    assert metrics["test/meta/f1"] >= 0.0
-    assert metrics["test/meta/accept_threshold"] == 0.5
-    assert metrics["test/decision/abstained_prediction_rate_pct"] >= 0.0
-    assert metrics["test/execution/n_trade_signals_raw"] >= 0
-    assert metrics["test/paper/n_executed_trades"] >= 0
+    assert metrics["val/classification/accuracy"] >= 0.0
+    assert metrics["val/meta/f1"] >= 0.0
+    assert metrics["val/decision/trade_signal_rate"] >= 0.0
+    assert metrics["val/execution/n_trade_signals_raw"] >= 0
+    assert metrics["val/portfolio/n_executed_trades"] >= 0
+    assert not any(key.startswith("test/") for key in metrics)
+    assert not any("/paper/" in key for key in metrics)
+
+    best_metrics = evaluator.evaluate_all(
+        model,
+        {"train": train_loader, "val": val_loader, "test": test_loader},
+        step=2,
+        metric_splits=("val", "test"),
+        detailed=True,
+    )
+
+    assert best_metrics["test/classification/f1_macro"] >= 0.0
+    assert best_metrics["test/paper/n_executed_trades"] >= 0
+    assert "_portfolio_curves" in best_metrics
+    assert not any(key.startswith("train/") for key in best_metrics)

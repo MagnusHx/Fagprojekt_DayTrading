@@ -66,26 +66,6 @@ class Trainer:
         return total_loss / max(n_batches, 1)
 
     @torch.no_grad()
-    def accuracy_only(self, loader: DataLoader) -> float:
-        """Compute split accuracy without materializing full prediction outputs."""
-        self.model.eval()
-        n_correct = 0
-        n_total = 0
-        for batch in loader:
-            x, y = batch[0], batch[1]
-            x = x.to(self.device, non_blocking=True)
-            y = y.to(self.device, non_blocking=True)
-            valid_mask = y >= 0
-            if not bool(torch.any(valid_mask)):
-                continue
-
-            pred = torch.argmax(self.model(x), dim=1)
-            n_correct += int((pred[valid_mask] == y[valid_mask]).sum().item())
-            n_total += int(valid_mask.sum().item())
-
-        return float(n_correct / max(n_total, 1))
-
-    @torch.no_grad()
     def mean_loss(self, loader: DataLoader) -> float:
         """Compute the mean batch loss for a loader."""
         self.model.eval()
@@ -136,16 +116,13 @@ class Trainer:
 
             metrics: Dict[str, Any] = {}
             metrics["epoch"] = int(ep)
-            metrics["train/loss"] = float(train_loss)
-
-            if train_eval_loader is not None:
-                metrics["train/eval_loss"] = self.mean_loss(train_eval_loader)
-            if val_loader is not None:
-                metrics["val/loss"] = self.mean_loss(val_loader)
-            if test_loader is not None:
-                metrics["test/loss"] = self.mean_loss(test_loader)
+            metrics["train/training/loss"] = float(train_loss)
 
             full_eval = (self.evaluator is not None) and do_full_eval(ep)
+
+            if val_loader is not None:
+                metrics["val/training/loss"] = self.mean_loss(val_loader)
+
             t0 = time.time()
 
             if full_eval:
@@ -158,10 +135,6 @@ class Trainer:
                     loaders["test"] = test_loader
 
                 metrics.update(self.evaluator.evaluate_all(self.model, loaders, step=ep))
-
-            else:
-                if val_loader is not None:
-                    metrics["val/accuracy"] = self.accuracy_only(val_loader)
 
             tspend["eval"].append(time.time() - t0)
 

@@ -127,6 +127,8 @@ def main() -> None:
         model,
         {"train": dl_train_eval, "val": dl_val, "test": dl_test},
         step=None,
+        metric_splits=("val", "test"),
+        detailed=True,
     )
     scalars = _scalar_metrics(metrics)
 
