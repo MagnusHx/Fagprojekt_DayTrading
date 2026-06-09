@@ -18,7 +18,7 @@ classifiers = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "datasets>=4.6.0",
+    "datasets>=5.0.0",
     "fastapi==0.115.6",
     "huggingface-hub>=1.4.1",
     "pandas-market-calendars>=5.0.0",
