@@ -516,7 +516,7 @@ def run_single_fold(
             print("-" * 10, "\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(_device_status_message(device))
+    print(_device_status_message(device), flush=True)
     model = create_model(
         model_name=args.model,
         n_features=exp.store.n_features,
@@ -689,7 +689,7 @@ def main() -> None:
                 fold_tag = f"fold{fold_idx:02d}"
                 fold_seed = int(base_seed + fold_idx)
                 _seed_everything(fold_seed)
-                print(f"\n=== Training {fold_tag} on {exp_dir} (seed={fold_seed}) ===")
+                print(f"\n=== Training {fold_tag} on {exp_dir} (seed={fold_seed}) ===", flush=True)
                 fold_logger = root_logger.child(namespace=fold_tag, step_offset=i * steps_per_fold)
                 fold_logger.log_config({"fold_seed": fold_seed})
                 fold_args = argparse.Namespace(**vars(args))
@@ -711,10 +711,10 @@ def main() -> None:
                 },
                 step=len(folds) * steps_per_fold + 1,
             )
-            print("\nCross-validation summary:")
-            print(f"  folds={len(bests)}")
-            print(f"  best val/meta/f1 mean={mean_best:.6f}")
-            print(f"  best val/meta/f1 std={std_best:.6f}")
+            print("\nCross-validation summary:", flush=True)
+            print(f"  folds={len(bests)}", flush=True)
+            print(f"  best val/meta/f1 mean={mean_best:.6f}", flush=True)
+            print(f"  best val/meta/f1 std={std_best:.6f}", flush=True)
             return
         finally:
             root_logger.stop()

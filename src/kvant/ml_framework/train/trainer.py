@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import torch
 from torch.utils.data import DataLoader
+import time
 
 from .evaluator import ExperimentEvaluator
 
@@ -19,6 +20,7 @@ class TrainConfig:
     checkpoint_metric: str = "val/accuracy"
 
     full_eval_every: int = 1
+    progress_batches: int = 250
 
 
 class Trainer:
@@ -39,13 +41,23 @@ class Trainer:
         self.evaluator = evaluator
         self.logger = logger
 
-    def train_one_epoch(self, loader: DataLoader) -> float:
+    def train_one_epoch(
+        self,
+        loader: DataLoader,
+        *,
+        epoch: int | None = None,
+        total_epochs: int | None = None,
+        progress_batches: int = 250,
+    ) -> float:
         """Train the model for one epoch and return mean batch loss."""
         self.model.train()
         total_loss = 0.0
         n_batches = 0
+        total_batches = len(loader)
+        started_at = time.time()
+        last_report_at = started_at
 
-        for batch in loader:
+        for batch_idx, batch in enumerate(loader, start=1):
             x, y = batch[0], batch[1]  # ignore tid/tpos
 
             x = x.to(self.device, non_blocking=True)
@@ -62,6 +74,29 @@ class Trainer:
 
             total_loss += float(loss.item())
             n_batches += 1
+
+            should_report = (
+                int(total_batches) > 0
+                and int(batch_idx) < int(total_batches)
+                and int(batch_idx) % max(1, int(progress_batches)) == 0
+            )
+            if should_report:
+                avg_loss = total_loss / max(n_batches, 1)
+                elapsed = time.time() - started_at
+                delta = time.time() - last_report_at
+                epoch_label = (
+                    f"epoch {int(epoch)}/{int(total_epochs)}"
+                    if epoch is not None and total_epochs is not None
+                    else f"epoch {int(epoch)}"
+                    if epoch is not None
+                    else "epoch"
+                )
+                print(
+                    f"{epoch_label} progress batch={batch_idx}/{total_batches} "
+                    f"avg_loss={avg_loss:.4f} elapsed={elapsed:.1f}s (+{delta:.1f}s)",
+                    flush=True,
+                )
+                last_report_at = time.time()
 
         return total_loss / max(n_batches, 1)
 
@@ -111,7 +146,13 @@ class Trainer:
 
         for ep in range(1, cfg.epochs + 1):
             t0 = time.time()
-            train_loss = self.train_one_epoch(train_loader)
+            print(f"Starting epoch {ep}/{cfg.epochs}...", flush=True)
+            train_loss = self.train_one_epoch(
+                train_loader,
+                epoch=ep,
+                total_epochs=cfg.epochs,
+                progress_batches=cfg.progress_batches,
+            )
             tspend["train"].append(time.time() - t0)
 
             metrics: Dict[str, Any] = {}
@@ -154,7 +195,8 @@ class Trainer:
             print(
                 f"epoch={ep:04d} train_loss={train_loss:.4f} "
                 f"{cfg.checkpoint_metric}={metric_val:.4f} best={best_metric:.4f} "
-                f"[{' '.join(timing_metrics)}]"
+                f"[{' '.join(timing_metrics)}]",
+                flush=True,
             )
 
         return {"best_state": best_state, "best_metric": best_metric}
