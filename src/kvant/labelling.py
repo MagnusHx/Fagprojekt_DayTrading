@@ -29,8 +29,11 @@ def _to_utc_ts(x: Union[pd.Timestamp, str]) -> pd.Timestamp:
 def tripple_bar_label(
     data: pd.DataFrame,
     time_start: Union[pd.Timestamp, str],
-    width: int,
     height: float,
+    width: int | None = None,
+    *,
+    width_minutes: int | None = None,
+    width_periods: int | None = None,
 ) -> Optional[TripleBarLabel]:
     """
     Triple-barrier label for a signal at/after `time_start`.
@@ -45,10 +48,14 @@ def tripple_bar_label(
         UTC time-indexed OHLCV-like dataframe with columns at least: open, high, low, close.
     time_start : Timestamp-like
         UTC timestamp (or coercible to pd.Timestamp).
-    width : int
-        Vertical barrier in minutes (max time in position).
+    width : int | None
+        Legacy alias for ``width_minutes`` kept for backward compatibility.
     height : float
         Fractional barrier size (e.g. 0.01 means +/- 1% from entry).
+    width_minutes : int | None
+        Vertical barrier in minutes (max time in position).
+    width_periods : int | None
+        Vertical barrier in sampled periods, including the entry period.
 
     Returns
     -------
@@ -82,9 +89,22 @@ def tripple_bar_label(
     signal_ts = df.index[signal_pos]
     entry_ts = df.index[entry_pos]
 
-    # Vertical barrier target and last available bar <= it
-    end_target = entry_ts + pd.Timedelta(minutes=int(width))
-    end_pos = df.index.searchsorted(end_target, side="right") - 1
+    if width is not None:
+        if width_minutes is not None or width_periods is not None:
+            raise ValueError("Pass either width or width_minutes/width_periods, not both.")
+        width_minutes = int(width)
+
+    has_width_minutes = width_minutes is not None and int(width_minutes) > 0
+    has_width_periods = width_periods is not None and int(width_periods) > 0
+    if has_width_minutes == has_width_periods:
+        raise ValueError("Exactly one of width_minutes or width_periods must be positive.")
+
+    if has_width_minutes:
+        end_target = entry_ts + pd.Timedelta(minutes=int(width_minutes))
+        end_pos = int(df.index.searchsorted(end_target, side="right") - 1)
+    else:
+        end_pos = int(entry_pos + int(width_periods) - 1)
+        end_pos = min(end_pos, len(df.index) - 1)
     if end_pos < entry_pos:
         return None
 

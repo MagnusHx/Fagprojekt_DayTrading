@@ -106,7 +106,7 @@ class DatasetConfiguration:
     year_month_val : list[tuple]
 
 
-def available_datasets(first_year=2015, warmup_quarters=16):
+def available_datasets(first_year=2015, warmup_quarters=4):
     # Which months go with which quarters.
     q2m = {0 : [0, 1, 2], 1 : [3, 4, 5], 2 : [6, 7, 8], 3 : [9, 10, 11]}
 
@@ -320,11 +320,11 @@ def get_huggingface_top_5_small_splits():
     return get_huggingface_top_n_tiny_splits(n=5, warmup_quarters=8)
 
 def get_huggingface_top_20_normal_splits():
-    return get_huggingface_top_n_tiny_splits(n=20, warmup_quarters=16)
+    return get_huggingface_top_n_tiny_splits(n=20, warmup_quarters=4)
 
 
 def get_huggingface_top_200_normal_splits():
-    return get_huggingface_top_n_tiny_splits(n=200, warmup_quarters=16)
+    return get_huggingface_top_n_tiny_splits(n=200, warmup_quarters=4)
 
 
 def get_huggingface_top_10_tiny_splits():

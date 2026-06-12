@@ -373,7 +373,7 @@ def _save_best_checkpoint_bundle(
             "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
-            "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0)),
+            **_backtest_width_config(labeler_cfg),
             "backtest_barrier_height": float(labeler_cfg.get("height", 0.0)),
         },
     }
@@ -425,6 +425,7 @@ def _make_logger(
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
             "backtest_width_minutes": None,
+            "backtest_width_periods": None,
             "backtest_barrier_height": None,
             "checkpoint_metric": "val/meta/f1",
             "metric_pipeline": "side_model -> meta_label -> trade_decision -> execution -> economics",
@@ -470,6 +471,14 @@ def _runtime_metadata(args: argparse.Namespace, *, exp_dir: Path, fold_tag: str 
         "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
         "require_market_data": bool(not args.no_return_stats),
         "preflight": preflight,
+    }
+
+
+def _backtest_width_config(labeler_cfg: dict[str, object]) -> dict[str, int]:
+    """Extract backtest width settings from prepared label metadata."""
+    return {
+        "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0) or 0),
+        "backtest_width_periods": int(labeler_cfg.get("width_periods", 0) or 0),
     }
 
 
@@ -524,6 +533,7 @@ def run_single_fold(
         **_model_kwargs(args),
     ).to(device)
     labeler_cfg = exp.cfg.get("labeler", {})
+    backtest_width_cfg = _backtest_width_config(labeler_cfg)
 
     w = class_weights_from_dataset(ds_train, n_classes=2)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(w, device=device), ignore_index=-1)
@@ -563,7 +573,7 @@ def run_single_fold(
             "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
             "risk_free_rate": args.risk_free_rate,
             "days_per_year": args.days_per_year,
-            "backtest_width_minutes": int(labeler_cfg.get("width_minutes", 0)),
+            **backtest_width_cfg,
             "backtest_barrier_height": float(labeler_cfg.get("height", 0.0)),
             "runtime_metadata": _runtime_metadata(args, exp_dir=exp_dir, fold_tag=fold_tag, preflight=preflight),
         }
@@ -598,7 +608,7 @@ def run_single_fold(
                 kelly_payoff_ratio=float(args.kelly_payoff_ratio),
                 risk_free_rate=args.risk_free_rate,
                 days_per_year=args.days_per_year,
-                backtest_width_minutes=int(labeler_cfg.get("width_minutes", 0)),
+                **backtest_width_cfg,
                 backtest_barrier_height=float(labeler_cfg.get("height", 0.0)),
                 labels=(0, 1),
             ),

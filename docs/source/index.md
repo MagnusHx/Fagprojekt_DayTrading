@@ -7,7 +7,7 @@ The current workflow prepares walk-forward experiment folds from minute OHLCV da
 ## Pipeline overview
 
 1. Cache Hugging Face OHLCV shards and construct top-volume ticker walk-forward splits.
-2. Compute intraday features before sampling, then fit CUSUM sampling, feature standardization, and feature selection on train data only.
+2. Compute intraday features before sampling, then fit fixed-threshold CUSUM sampling and feature standardization on train data only.
 3. Persist prepared fold artifacts with features, labels, sampled OHLCV, label metadata, and diagnostics.
 4. Validate the prepared artifact contract before any training run.
 5. Train a PyTorch side classifier and evaluate the side-plus-meta decision policy.
@@ -39,6 +39,6 @@ uv run python -m kvant.ml_prepare_data.prepare_experiment
 After preparing data, validate or train from the generated prepared manifest:
 
 ```bash
-uv run python -m kvant.ml_framework.scripts.smoke_prepared_experiment --cv-manifest src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_cv_manifest.json
-WANDB_MODE=offline uv run python -m kvant.ml_framework.scripts.train_experiment --exp-dir src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_fold00 --epochs 1 --no-return-stats
+uv run python -m kvant.ml_framework.scripts.smoke_prepared_experiment --cv-manifest src/kvant/ml_framework/prepared/sb_L_96_wp24_h5_fixedCUSUM0.02_cv_manifest.json
+WANDB_MODE=offline uv run python -m kvant.ml_framework.scripts.train_experiment --exp-dir src/kvant/ml_framework/prepared/sb_L_96_wp24_h5_fixedCUSUM0.02_fold00 --epochs 1 --no-return-stats
 ```

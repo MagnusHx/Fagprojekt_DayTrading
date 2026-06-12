@@ -1,104 +1,79 @@
 # Latest Experiment Analysis
 
-Last updated: 2026-04-27
+Last updated: 2026-06-12
 
-## Run Identified
+## Current Status
 
-The latest completed local experiment is:
+The repository defaults have been reset to the paper-aligned baseline described in
+`references/s40854-025-00866-w.pdf` more closely than before:
+
+- fixed-threshold CUSUM with `h=0.02`
+- lookback `L=96`
+- Triple Barrier vertical horizon of `24` sampled periods
+- symmetric horizontal barriers of `5%`
+- walk-forward warmup of `4` quarters
+- full default feature set with no default feature selection
+
+The latest code also treats the sampled bar as the signal and enters on the next sampled bar open in both labeling and
+backtest code. This makes the default path live-safe relative to aggregated CUSUM bars.
+
+## Important Caveat
+
+There is not yet a completed local training run on disk that uses the new default prepared artifacts
+`sb_L_96_wp24_h5_fixedCUSUM0.02_*`.
+
+The latest completed local run still appears to be the older legacy setup:
 
 - W&B directory: `wandb/run-20260427_213934-bm3y428m`
 - Model: `resnet_lstm`
 - Epochs: `30`
 - Manifest: `src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_fixedCUSUM0.01_cv_manifest.json`
 - Transaction cost: `0.001`
-- Meta features in this run: `['proba', 'embedding']`
-- Meta accept threshold: `0.6`
-- Checkpoint metric: `val/meta/f1`
 
-Important caveat: this run predates the newest portfolio-account evaluation and enriched default meta-feature setup. It does not contain `portfolio/*` metrics, and it did not use the newer prepared volatility/return aliases, rolling ticker win-rate features, prediction margin/entropy, or time-since-event meta features.
+That run should now be treated as historical context only. It does not represent the current default methodology.
 
-## Cross-Fold Summary
+## What This Means For Interpretation
 
-| Metric | Mean | Interpretation |
-| --- | ---: | --- |
-| `best/val/meta/f1` | `0.0907` | Very weak TAKE/PASS selection on validation. |
-| `best/test/meta/f1` | `0.1067` | Weak out-of-sample meta-label behavior. |
-| `best/test/cls/f1_macro` | `0.4407` | Side model is close to noisy/barely useful. |
-| `best/test/accuracy` | `0.5023` | Directional accuracy is approximately random. |
-| `best/test/decision/trade_signal_rate` | `0.0585` | The threshold makes the model trade only about 6% of events. |
-| `best/test/execution/n_executed_trades` | `186` | Much fewer trades than the Conv1D run, increasing metric instability. |
-| `best/test/execution/executed_trade_hit_rate_pct` | `54.99%` | Hit rate is above 50%, but not enough after costs. |
-| `best/test/paper/executed_trade_net_return_avg_pct` | `-0.0380%` | Average executed trade loses after costs. |
-| `best/test/paper/executed_trade_net_return_total_pct` | `-7.62%` | Total trade-level net return is negative. |
-| `best/test/paper/annual_net_profit_loss_pct` | `-24.23%` | Annualized diagnostic return is negative. |
-| `best/test/paper/sharpe_ratio_annualized` | `-2.56` | Risk-adjusted result is poor. |
-| `best/test/paper/max_drawdown_pct` | `9.30%` | Drawdown is non-trivial despite low take rate. |
+Older experiment results are useful only as evidence that the previous baseline was weak. They should not be used as
+the main evaluation of the project after the methodology reset, because they differ on:
 
-## Comparison Against Previous Conv1D Run
+- CUSUM threshold
+- Triple Barrier width and height
+- lookback length
+- warmup window
+- prepared artifact naming and metadata contracts
+- default meta-feature setup and current portfolio evaluation stack
 
-Previous local Conv1D run:
+## Current Recommended Baseline
 
-- W&B directory: `wandb/run-20260427_185333-guiy48yc`
-- Model: `conv1d`
-- Epochs: `20`
-- Meta threshold: `0.5`
-- Same fixed-CUSUM manifest and transaction cost.
+Regenerate folds and rerun the baseline before drawing new conclusions:
 
-| Metric | Conv1D mean | ResNet-LSTM mean | Comment |
-| --- | ---: | ---: | --- |
-| `best/val/meta/f1` | `0.5101` | `0.0907` | ResNet-LSTM meta selection is much worse under the current threshold/setup. |
-| `best/test/meta/f1` | `0.5081` | `0.1067` | Same pattern out of sample. |
-| `best/test/trade_signal_rate` | `0.5035` | `0.0585` | ResNet-LSTM trades far less. |
-| `best/test/n_executed_trades` | `1464.6` | `186.0` | ResNet-LSTM result is based on fewer trades. |
-| `best/test/net_return_avg_pct` | `-0.0058%` | `-0.0380%` | ResNet-LSTM has worse average net trade return. |
-| `best/test/annual_net_profit_loss_pct` | `-28.49%` | `-24.23%` | Both are negative; ResNet-LSTM only looks slightly less bad because it trades less. |
-| `best/test/sharpe_ratio_annualized` | `-6.20` | `-2.56` | Lower activity softens the Sharpe damage but does not create edge. |
+```bash
+uv run python -m kvant.ml_prepare_data.prepare_experiment
+uv run python -m kvant.ml_framework.scripts.smoke_prepared_experiment --cv-manifest src/kvant/ml_framework/prepared/sb_L_96_wp24_h5_fixedCUSUM0.02_cv_manifest.json
+WANDB_MODE=offline uv run python -m kvant.ml_framework.scripts.train_experiment --baseline --epochs 3
+```
 
-## Diagnosis
+## Current Search Space
 
-The latest experiment does not show an investable signal. The main issue is not only model architecture. The side model remains near random out of sample, while the meta layer becomes extremely conservative at threshold `0.6` and still does not select profitable trades after transaction costs.
-
-Most likely causes:
-
-1. The fixed 1% CUSUM plus `width=180`, `height=1.5%` label setup may be too coarse for minute-level US equities.
-2. The ResNet-LSTM is probably overfitting weak/noisy side labels: train loss improves, but validation meta F1 remains very low.
-3. The meta threshold of `0.6` is too restrictive for this probability distribution; recall collapses while precision does not rise enough.
-4. Transaction costs dominate the edge. Average gross returns are small and inconsistent, so even a modest cost turns the strategy negative.
-5. The latest run did not use the newly added meta features or the new portfolio simulator, so it is not the final version of the project approach.
-
-## Recommended Next Step
-
-Do not spend the next iteration on a larger neural architecture. The next most valuable improvement is a label/sampling calibration experiment:
-
-1. Regenerate corrected folds using a small grid of Triple Barrier settings and fixed-CUSUM thresholds.
-2. Keep the model simple first, preferably Conv1D, so the comparison isolates data/label quality.
-3. Evaluate each configuration with the enriched meta features and the new `portfolio/*` metrics.
-4. Select a baseline only if it improves out-of-sample portfolio return, drawdown, and skipped-budget behavior, not only meta F1.
-
-Suggested first grid:
+The small paper-aligned grid runner now targets:
 
 | Parameter | Values |
 | --- | --- |
-| CUSUM threshold | `0.005`, `0.01`, `0.02` |
-| Barrier height | `0.005`, `0.01`, `0.015` |
-| Barrier width | `60`, `120`, `180` minutes |
-| Model | `conv1d` first, then `resnet_lstm` only on promising settings |
-| Meta threshold | tune on validation, compare `0.45`, `0.50`, `0.55`, `0.60` |
+| CUSUM threshold | `0.01`, `0.02`, `0.03` |
+| Barrier height | `0.025`, `0.05`, `0.06` |
+| Barrier width | `24` sampled periods |
+| Model sequence | `conv1d` first, then `resnet_lstm` on promising settings |
 
-The project should aim to find a label/sampling regime where gross trade return is clearly positive before costs. If gross edge is weak, model and meta changes will mostly rearrange negative-cost trades.
+The current promising template in `reports/promising_grid_configs.json` prioritizes:
 
-## Grid Runner
+- `cusum_h=0.02`, `barrier_height=0.05`, `barrier_width_periods=24`
+- `cusum_h=0.03`, `barrier_height=0.06`, `barrier_width_periods=24`
 
-The calibration grid has been set up in `src/kvant/ml_framework/scripts/run_experiment_grid.py`.
+## Bottom Line
 
-Use these commands:
+The project reports should now be read as follows:
 
-```bash
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid plan
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid prepare --execute
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d --execute --max-runs 4
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid write-promising-template
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-resnet --execute
-```
-
-The runner is dry-run by default. It only executes commands when `--execute` is passed, and it writes the selected command list to `artifacts/run_debug/experiment_grid_plan.json`.
+- the code baseline is paper-aligned more closely than before
+- the latest completed local experiment is legacy
+- a fresh baseline run is still needed before making updated performance claims

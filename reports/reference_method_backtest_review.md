@@ -11,20 +11,27 @@ It focuses on why the current project may be producing weak trading results and 
 
 ## Short Answer
 
-The project contains several sensible pieces from the references: CUSUM-style event sampling, Triple Barrier labeling, train-only fitted preprocessing, side/meta-label separation, transaction costs, and non-overlapping same-ticker trade execution.
+The project now contains the main reference-inspired building blocks in a materially cleaner form: fixed-threshold
+CUSUM as the default baseline, Triple Barrier labeling, train-only preprocessing, side/meta-label separation,
+transaction costs, purged split construction, next-sampled-bar execution, and non-overlapping same-ticker trade
+handling.
 
-However, the backtest is not fully correct in its current form. The largest issue is execution timing with aggregated CUSUM bars. The sampled bar is timestamped at the end of the CUSUM segment, but the labeler and backtest enter at that sampled bar's `open`, which is the first minute of the segment. That open price existed before the model's signal timestamp. This creates a time-consistency problem and can make label/backtest economics different from what could be traded live.
+The most serious earlier correctness issues have been addressed in source:
 
-A second important issue is split-boundary leakage. Triple Barrier labels span intervals, but split indices are assigned only by event start timestamp. Training examples close to a validation/test boundary can have labels whose barrier outcome is determined using future validation/test prices. Lopez de Prado's purging/embargo guidance is directly relevant here.
+- aggregated sampled bars no longer enter at the historical segment open
+- split construction now purges label intervals that cross boundaries
+
+The remaining gaps are no longer basic timing correctness problems. They are mainly methodology and calibration gaps:
+US equities versus crypto, feature timing differences, no volatility-scaled barriers yet, no range-bar ablation, and
+no custom period-aware embargo beyond interval purging.
 
 ## High-Priority Findings
 
 | Priority | Finding | Impact | Where |
 | --- | --- | --- | --- |
-| P0 | Aggregated CUSUM bars enter at historical segment open while signal timestamp is segment end | Backtest/labels are not live-trade-consistent | `src/kvant/ml_prepare_data/samplers/sampler_cumsum.py`, `src/kvant/labelling.py`, `src/kvant/ml_framework/train/backtest.py` |
-| P0 | Split indices use event start timestamp but do not purge events whose label window crosses split boundaries | Leakage around train/val/test boundaries | `src/kvant/ml_prepare_data/prepare_experiment.py` |
-| P1 | Current CUSUM is tuned to bars/day, not fixed-threshold CUSUM as in the 2025 paper's main sensitivity | Paper comparison is weak; may tune away volatility signal | `TunedCUSUMBarSampler` |
-| P1 | Current barrier settings are not adapted to US equities and likely produce too many exits | Weak directional sample quality and poor economics | `TripleBarrierLabeler(width=180, height=0.015)` |
+| P1 | Current defaults are now closer to the 2025 paper, but the project still uses US-equity-specific data and a shorter warmup window | Paper comparison is improved but still not literal | `FixedThresholdCUSUMBarSampler(h=0.02)`, `TripleBarrierLabeler(width_periods=24, height=0.05)` |
+| P1 | Static paper-style barriers may still be poorly calibrated for US equities | Weak directional sample quality and poor economics remain possible even with paper-aligned defaults | `TripleBarrierLabeler(width_periods=24, height=0.05)` |
+| P1 | Period-based barriers currently rely on label-interval purging without an added period-aware embargo heuristic | Possible near-boundary dependence remains worth studying | `src/kvant/ml_prepare_data/prepare_experiment.py` |
 | P1 | Model/training stack is weaker than the reference setup | Lower signal quality | Conv1D baseline, limited HPO, no multi-seed ensemble |
 | P2 | Feature timing differs from the 2025 paper | Not necessarily wrong, but not paper-faithful | Project computes features before sampling; paper describes computing indicators after sampling |
 | P2 | Annualization and portfolio assumptions are simplified | Metrics are useful diagnostics, not live-trading PnL | `compute_paper_trading_metrics` |
@@ -38,14 +45,14 @@ Lopez de Prado motivates event-based sampling because ML should learn from relev
 Current project status:
 
 - Uses CUSUM-style sampling.
-- Tunes `h` per ticker to target a bars-per-day count.
-- Does not yet implement fixed-threshold CUSUM sweeps such as 1%, 2%, 3%.
+- Defaults to fixed-threshold CUSUM with a `2%` threshold.
+- Still supports tuned bars/day CUSUM as a project-specific ablation.
 - Does not yet implement range bars, dollar bars, or volume bars as ablations.
 
 Suggested work:
 
-1. Add fixed-threshold CUSUM as a separate sampler mode.
-2. Compare fixed CUSUM thresholds against the current tuned-bars/day sampler.
+1. Compare fixed `1%`, `2%`, and `3%` CUSUM thresholds against the current `2%` default.
+2. Compare fixed CUSUM thresholds against the tuned-bars/day sampler.
 3. Add range bars as the closest alternative to CUSUM.
 4. Treat dollar/volume bars as lower priority for US equities unless reliable volume/dollar-volume adjustments are handled.
 
@@ -61,12 +68,12 @@ Current project status:
 
 Main concern:
 
-- Barrier parameters are probably not calibrated to the US equity minute setting.
-- `height=1.5%` and `width=180min` can be too far for many liquid large-cap intraday windows, leading to many time exits and weak actionable signal.
+- The repo now defaults to the paper's `24`-period vertical barrier and `5%` symmetric horizontal barriers.
+- Those defaults are plausible as a baseline but are still not necessarily calibrated to the US equity minute setting.
 
 Suggested work:
 
-1. Sweep `height` and `width` on equities.
+1. Sweep fixed CUSUM and static Triple Barrier values around the paper defaults on equities.
 2. Report tradeable share, not only accuracy.
 3. Prefer configurations that balance tradeable share, executed trade hit rate, net return, and drawdown.
 4. Try dynamic barriers based on recent volatility, but treat this as an ablation because the 2025 paper found dynamic barriers did not automatically improve results.
@@ -88,7 +95,7 @@ Concerns:
 
 Suggested work:
 
-1. Fix label/backtest timing first.
+1. Work from regenerated paper-default folds first.
 2. Then evaluate meta-label calibration and threshold stability.
 3. Compare meta-labeling against a simple fixed probability band, such as long if `P(up) > 0.60`, short if `P(up) < 0.40`.
 
@@ -99,8 +106,8 @@ Lopez de Prado emphasizes that labels derived from overlapping time intervals re
 Current project status:
 
 - Uses chronological train/validation/test splits.
-- Builds split indices by event timestamp only.
-- Does not check whether an event's `bar_close_time` crosses into the next split.
+- Checks whether a label interval remains inside the split before adding it to the saved index.
+- Applies a fixed time embargo only for minute-based barriers; period-based default barriers rely on interval purging alone.
 
 Why this matters:
 
@@ -110,13 +117,13 @@ Why this matters:
 
 Suggested work:
 
-1. While building indices, require the label close time to remain inside the same split as the event start.
-2. Drop or embargo events near split boundaries whose label interval overlaps the next split.
+1. Keep validating that label close time remains inside the same split as the event start.
+2. Decide whether period-based barriers need an additional custom embargo rule beyond the existing interval purge.
 3. Add validation tests that assert no train label interval intersects validation/test windows.
 
 ## Is the Backtest Correct?
 
-Not fully.
+Much closer, but still not perfect.
 
 The code does several good things:
 
@@ -126,7 +133,8 @@ The code does several good things:
 - Allows concurrent trades across different tickers.
 - Computes portfolio compounding, daily returns, Sharpe, drawdown, and active time.
 
-But there are correctness risks that should be fixed before trusting the numbers.
+But there are still interpretation risks that should be kept in mind before treating the numbers as production-grade
+economics.
 
 ### Backtest Issue 1: Aggregated Bar Entry Uses the Past
 
@@ -138,40 +146,36 @@ But there are correctness risks that should be fixed before trusting the numbers
 - low = min low in the segment
 - close = final close in the segment
 
-The model receives features sampled at the segment end timestamp. At that moment, the segment open is already historical. But both the labeler and the backtest use the sampled bar `open` as the entry price.
+The model receives features sampled at the segment end timestamp. At that moment, the segment open is already
+historical.
 
-That means the simulated trade can enter at a price before the signal exists.
+Current status:
 
-Recommended fix:
-
-- For event timestamp `t`, enter at the next tradable price after `t`.
-- Conservative options:
-  - enter at next sampled bar open,
-  - enter at current sampled bar close,
-  - or store original minute bars and enter at next minute open after the event timestamp.
-- The labeler and backtest must use the same entry convention.
+- This has been fixed in the default path.
+- Labeling and backtest now both treat the sampled row as the signal and enter at the next sampled bar open.
 
 ### Backtest Issue 2: Same-Bar Barrier Hits
 
-The backtest checks barrier hits starting at `entry_pos`, including the entry bar. With aggregated bars, the high/low of that entry bar may include prices before the signal timestamp.
+The main risk was that barrier search could include pre-signal path information from the same aggregated bar.
 
-Recommended fix:
+Current status:
 
-- If using current bar close as entry, barrier search should begin after the entry timestamp.
-- If using next bar open as entry, barrier search should begin at the next bar.
-- Do not let the entry bar's pre-signal high/low trigger a barrier.
+- The default next-bar entry convention resolves the worst version of this issue.
+- A future integration test using aggregated CUSUM segments plus raw minute reconstruction would still be valuable.
 
 ### Backtest Issue 3: Split Boundary Leakage
 
 The preparation code processes full train+validation+test history per ticker and labels sampled bars. That is acceptable only if index construction prevents training labels from using future split prices.
 
-Current status: fixed in the preparation pipeline. Split index construction now uses label intervals, purges examples that would close outside their split, and applies an embargo before the next boundary.
+Current status: mostly fixed in the preparation pipeline. Split index construction now uses label intervals and purges
+examples that would close outside their split. Minute-based barriers also receive a fixed embargo. Period-based
+defaults currently rely on interval purging alone.
 
 Implemented fix:
 
 - Store `bar_open_time` and `bar_close_time` for every label.
 - Include an example in a split only if both open and close are inside that split.
-- Apply an embargo around split boundaries so near-boundary labels do not leak future information.
+- Apply an embargo around split boundaries when the barrier uses a fixed wall-clock width.
 
 ### Backtest Issue 4: Annualization is Useful but Simplified
 
@@ -195,12 +199,16 @@ Implemented fix:
 
 The most likely reasons are:
 
-1. The project is not a close reproduction of the 2025 paper. It uses US equities, NYSE hours, minute OHLCV data, tuned bars/day CUSUM, and a smaller model stack.
+1. The project is not a close reproduction of the 2025 paper. It uses US equities, NYSE hours, minute OHLCV data, a
+   4-quarter warmup, and a smaller model stack.
 2. Barrier settings likely create an exit-heavy label regime for equities.
 3. The primary model is likely underpowered compared with the paper's ResNet-LSTM plus HPO, early stopping, multi-seed averaging, and ensembling.
-4. The current sampler objective targets sample density rather than a market-move threshold.
-5. Backtest/label timing was previously inconsistent when aggregated bars were used; this has been fixed, but prepared folds must be regenerated.
-6. Boundary events previously were not purged by label interval; this has been fixed, but old generated folds should not be trusted for final claims.
+4. The project still supports non-paper sampler variants and has not yet completed a fresh paper-default rerun, so the
+   practical baseline remains unverified.
+5. Backtest/label timing was previously inconsistent when aggregated bars were used; this has been fixed, but prepared
+   folds must be regenerated.
+6. Boundary events previously were not purged by label interval; this has been fixed, but old generated folds should
+   not be trusted for final claims.
 
 ## Recommended Fix Order
 

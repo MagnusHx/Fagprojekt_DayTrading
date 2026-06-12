@@ -1,6 +1,6 @@
 # Full Pipeline Analysis
 
-Last updated: 2026-06-09
+Last updated: 2026-06-12
 
 ## Scope
 
@@ -51,10 +51,10 @@ Data comes from the Hugging Face dataset `mito0o852/OHLCV-1m`. Monthly parquet s
 `src/kvant/kdata/hf_minute_data.py`.
 
 The default preparation entrypoint calls `get_huggingface_top_20_normal_splits()`, which builds top-20 ticker splits
-using `get_huggingface_top_n_tiny_splits(n=20, warmup_quarters=16)`. Internally, `available_datasets(first_year=2020,
-warmup_quarters=16)` creates five walk-forward configurations from 2020 through 2025 Q1:
+using `get_huggingface_top_n_tiny_splits(n=20, warmup_quarters=4)`. Internally, `available_datasets(first_year=2020,
+warmup_quarters=4)` creates seventeen rolling walk-forward configurations:
 
-1. 16 training quarters.
+1. 4 training quarters.
 2. The next quarter for validation.
 3. The following quarter for test.
 
@@ -64,10 +64,9 @@ as `SPY`, `QQQ`, `SQQQ`, `TQQQ`, `LQD`, `HYG`, `FB`, and `TLT`.
 
 ### 2. Sampler Fit and Event-Bar Construction
 
-The implemented default sampler is `TunedCUSUMBarSampler` in
-`src/kvant/ml_prepare_data/samplers/sampler_cumsum.py`. It is fit on training data only. For each ticker, it searches
-an `h_grid` of fractional close-return thresholds and chooses the threshold that best matches a target bars-per-day
-density. The current CLI default is `--target-bars-per-day 30`.
+The implemented default sampler is `FixedThresholdCUSUMBarSampler` in
+`src/kvant/ml_prepare_data/samplers/sampler_cumsum.py`, with the preparation CLI now defaulting to
+`--sampler fixed_cusum --cusum-h 0.02` to match the paper's main CUSUM baseline more closely.
 
 After fitting, the sampler transforms the full per-ticker history. With `aggregate_ohlcv=True`, each CUSUM segment is
 collapsed into one sampled bar:
@@ -79,8 +78,8 @@ collapsed into one sampled bar:
 - close: final segment close
 - volume: segment volume sum
 
-There is also a `FixedThresholdCUSUMBarSampler`, selected with `--sampler fixed_cusum --cusum-h <h>`, for
-reference-style ablations.
+There is also a `TunedCUSUMBarSampler`, selected with `--sampler tuned_cusum --target-bars-per-day <n>`, as a
+project-specific ablation when bar-density targeting is desired.
 
 ### 3. Feature Engineering
 
@@ -91,14 +90,13 @@ The default feature engineer is:
 
 - `IntradayTA10Features`
 - wrapped by `StandardizedFeatures`
-- optionally reduced by `PrimarySideFScoreSelector(top_k=16)`
+- by default uses the full feature set without train-only feature selection
 
 The TA feature set includes OHLCV, log return, EMA/EWM standard deviation groups, MACD, RSI, stochastic oscillator,
 Williams %R, Bollinger features, CMF, MFI, and sine/cosine time features.
 
-The scaler is fit on minute-resolution training chunks only. The feature selector is also train-only: it samples train
-events, labels them, maps raw event outcomes to primary side labels, ignores time-exit rows, and fits an F-score
-selector for the primary side task.
+The scaler is fit on minute-resolution training chunks only. Optional feature selection is still available through
+`--feature-selection-top-k`, but it is no longer part of the default paper-aligned baseline.
 
 ### 4. Triple-Barrier Labeling
 
@@ -113,8 +111,10 @@ The canonical event-outcome label space is:
 | `1` | vertical/time exit |
 | `2` | up barrier hit |
 
-The current source default is `lookback_L=12`, `barrier_width=180` minutes, and `barrier_height=1.5%`. The generated
-artifact currently on disk uses `lookback_L=12`, `barrier_width=120`, and `barrier_height=1.5%`.
+The current source default is `lookback_L=96`, a static symmetric barrier height of `5%`, and a vertical barrier of
+`24` sampled periods. This matches the paper's main Triple Barrier setup more closely than the older
+`width=180 minutes`, `height=1.5%` baseline. The implementation still supports legacy minute-based vertical barriers,
+but the default path is now period-based.
 
 The labeler uses a live-safe execution convention: the sampled bar timestamp is treated as the signal time, and entry
 is at the next sampled bar open. Barrier scanning starts from that executable entry bar. This fixes the common mistake
@@ -134,9 +134,9 @@ Valid target positions must have:
 - enough lookback history: `position >= lookback_L`
 - a label interval that remains inside the relevant split
 
-The pipeline derives an embargo from the labeler width. A train or validation event near the next split boundary is
-dropped if its label interval could cross into the next split. This implements the purging/embargo idea from Lopez de
-Prado for interval-based financial labels.
+The pipeline derives an embargo from the labeler width only when the vertical barrier is minute-based. For the new
+paper-aligned period-based default, purging is still enforced from the realized label interval metadata, but there is
+no additional fixed time embargo because a sampled-period horizon does not map to one constant wall-clock duration.
 
 The final prepared artifact stores:
 
@@ -245,7 +245,7 @@ regenerable and ignored by git.
 
 ## What Is Currently Materialized on Disk
 
-The untracked prepared artifact currently present is:
+An older untracked prepared artifact currently present is:
 
 `Fagprojekt_DayTrading/src/kvant/ml_framework/prepared/sb_L_12_w120_h1.5_TBPD30`
 
@@ -262,31 +262,32 @@ The per-ticker metadata still shows the full TA feature list and sampler diagnos
 threshold `h=0.0025`, has 834,422 raw rows, 48,518 sampled rows, and a sampled density of about 42.26 bars/day. Its
 valid target labels are heavily time-exit dominated: 1,864 down, 18,603 exit, and 1,671 up.
 
-This means the source code and generated artifact are not perfectly aligned. For final experiments, regenerate prepared
-folds from the current source so the artifact includes the current label-semantics metadata, feature-selector metadata,
-market data, purging/embargo behavior, and CV manifest expected by the training CLI.
+This means the source code and generated artifact are not perfectly aligned. The checked-in code now targets a
+paper-aligned baseline such as `sb_L_96_wp24_h5_fixedCUSUM0.02_*`. Regenerate prepared folds from the current source
+before trusting any new experiment or report.
 
 ## Alignment With References
 
 | Method | Reference motivation | Current implementation |
 | --- | --- | --- |
-| Event-based sampling | Lopez de Prado and the 2025 article emphasize informative events over clock bars. | Implemented with tuned and fixed CUSUM samplers. |
+| Event-based sampling | Lopez de Prado and the 2025 article emphasize informative events over clock bars. | Implemented with fixed and tuned CUSUM samplers; fixed `2%` CUSUM is now the default baseline. |
 | Triple-barrier labeling | Both references use barrier-based event outcomes instead of simple next-bar direction. | Implemented with down/exit/up labels and metadata. |
 | Side plus meta-labeling | Lopez de Prado separates side prediction from whether/size to trade. | Implemented as binary side model plus logistic TAKE/PASS meta-labeler. |
 | Purging and embargo | Lopez de Prado warns that interval labels leak across splits. | Implemented in split index construction. |
 | Deep learning classifier | The 2025 article uses deep learning over engineered trading features. | Implemented with Conv1D and ResNet-LSTM. |
 | Transaction-cost-aware evaluation | Intraday costs can dominate gross edge. | Implemented in paper diagnostics and portfolio simulation. |
 | Reference-faithful bar ablations | The 2025 article compares multiple bar types. | Fixed CUSUM exists; range, dollar, and volume bars are not implemented. |
-| Dynamic volatility barriers | Lopez de Prado often scales barriers by volatility. | Not implemented; current labeler uses fixed percentage barriers. |
+| Dynamic volatility barriers | Lopez de Prado often scales barriers by volatility. | Not implemented; the current default remains the paper-style static `5%` barrier. |
 
 ## Key Caveats
 
 1. The project is not a direct reproduction of the 2025 crypto paper. It applies related ideas to US equities.
-2. Current default tuned CUSUM targets sample density, while fixed-threshold CUSUM is the closer reference ablation.
+2. Current defaults are closer to the paper than before: fixed `2%` CUSUM, `24` sampled periods, `5%` barrier height,
+   and `L=96`.
 3. Technical indicators are computed before sampling. This is defensible for one-minute equity indicators but differs
    from pipelines that compute indicators on event bars after sampling.
-4. Time exits dominate at least the generated AAPL artifact, suggesting the barrier width/height regime needs
-   calibration.
+4. The walk-forward default now uses a 1-year training warmup instead of the paper's long expanding history. This is an
+   intentional project choice and should be kept in mind when comparing results.
 5. Old generated artifacts should not be trusted if they predate the current next-entry, purging/embargo, and metadata
    contracts.
 6. `paper/*` metrics are diagnostic. Use `portfolio/*` metrics for final economic claims.
@@ -335,9 +336,10 @@ uv run pytest tests/
 The true implemented pipeline is:
 
 minute OHLCV shards -> walk-forward top-volume ticker splits -> train-only CUSUM sampler fit -> minute-level TA feature
-computation and train-only scaling -> CUSUM event-bar sampling -> train-only feature selection -> triple-barrier
-event-outcome labeling -> purged/embargoed split indices -> binary primary side model -> logistic meta-label TAKE/PASS
-policy -> Kelly-sized trade decisions -> next-sampled-bar backtest -> budget-constrained portfolio metrics.
+computation and train-only scaling -> CUSUM event-bar sampling -> optional train-only feature selection ->
+triple-barrier event-outcome labeling -> purged/embargoed split indices -> binary primary side model -> logistic
+meta-label TAKE/PASS policy -> Kelly-sized trade decisions -> next-sampled-bar backtest -> budget-constrained
+portfolio metrics.
 
 The strongest methodological pieces are already present: event sampling, triple-barrier labels, side/meta separation,
 split leakage controls, live-safe next-bar entry, and portfolio-level metrics. The main remaining research risk is not

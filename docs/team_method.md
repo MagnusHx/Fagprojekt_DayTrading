@@ -1,6 +1,6 @@
 # Team Method
 
-Last updated: 2026-04-27
+Last updated: 2026-06-12
 
 This file defines how the `kvant` team works together. It should be used together with:
 
@@ -85,7 +85,7 @@ Use this workflow for research changes, model changes, and pipeline changes.
 
 1. Define the question.
 
-Example: "Does fixed-threshold CUSUM improve label balance and net return compared with tuned bars/day CUSUM?"
+Example: "Do the paper-aligned fixed-threshold CUSUM defaults improve label balance and net return compared with tuned bars/day CUSUM?"
 
 2. Locate the relevant reference or project note.
 
@@ -159,8 +159,8 @@ When changing one of these areas, add extra detail:
 | Question | Why it matters | Suggested next evidence |
 | --- | --- | --- |
 | Does corrected next-bar entry materially change label balance and backtest economics? | Old prepared labels/backtests used optimistic timing for aggregated bars. | Regenerate folds and compare old vs new metrics. |
-| Which Triple Barrier width/height works for US equities? | The current defaults may create too many exits and weak actionable samples. | Run barrier sweep and log tradeable share plus economics. |
-| Is tuned bars/day CUSUM better than fixed-threshold CUSUM? | Current sampler is useful but not paper-faithful. | Implement fixed thresholds and run controlled ablations. |
+| Which static Triple Barrier values around the paper defaults work for US equities? | The current baseline is paper-aligned, but US equities may need different thresholds to avoid too many exits or too little action. | Run a static barrier sweep around `5%` with the `24`-period horizon fixed and log tradeable share plus economics. |
+| Is tuned bars/day CUSUM better than fixed-threshold CUSUM? | Fixed `2%` CUSUM is now the baseline, but tuned bars/day CUSUM may still fit equities better. | Run controlled ablations against fixed `1%`, `2%`, and `3%` CUSUM. |
 | Does ResNet-LSTM outperform Conv1D on corrected data? | The reference model family is stronger than the current fast baseline. | Run same folds, same costs, same decision policy, multiple seeds. |
 | Is meta-labeling better than a simple probability band? | Meta-labeling adds complexity and must prove value. | Compare meta policy to fixed probability band under identical backtest assumptions. |
 | How different are `paper/*` and `portfolio/*` conclusions? | The stricter portfolio simulator is now available, but the team still needs experiment evidence showing whether budget constraints materially change conclusions. | Run corrected folds and compare final balance, drawdown, exposure, skipped-budget count, and diagnostic paper return. |

@@ -598,7 +598,7 @@ def build_data_pipeline_svg() -> None:
         ("entry", "Entry point", "prepare_experiment.main"),
         ("download", "Resolve dataset split", "get_huggingface_top_20_normal_splits"),
         ("load", "Load ticker data", "get_ticker_data"),
-        ("sample", "Fit and sample bars", "TunedCUSUMBarSampler.fit/transform"),
+        ("sample", "Fit and sample bars", "FixedThresholdCUSUMBarSampler.fit/transform"),
         ("features", "Engineer features", "IntradayTA10Features / StandardizedFeatures"),
         ("label", "Apply labels", "TripleBarrierLabeler.transform"),
         ("store", "Write prepared artifacts", "save_ticker_artifacts + indices"),
@@ -742,7 +742,7 @@ def markdown_document(modules: list[ModuleInfo], entrypoints: list[tuple[str, st
 
     pipeline = [
         ("Data entry", "`src/kvant/ml_prepare_data/prepare_experiment.py:main()` discovers a dataset split and loads per-ticker OHLCV frames."),
-        ("Sampling", "`TunedCUSUMBarSampler.fit/transform()` reduces dense minute data to event bars."),
+        ("Sampling", "`FixedThresholdCUSUMBarSampler.fit/transform()` reduces dense minute data to event bars by default."),
         ("Features", "`IntradayTA10Features` and `StandardizedFeatures` convert bars into model-ready features."),
         ("Labels", "`TripleBarrierLabeler.transform()` assigns targets and metadata for downstream profit analysis."),
         ("Prepared artifacts", "`prepare_experiment()` writes ticker arrays plus split indices into `src/kvant/ml_framework/prepared/`."),

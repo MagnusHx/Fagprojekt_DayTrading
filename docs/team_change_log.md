@@ -1,6 +1,6 @@
 # Team Change Log
 
-Last updated: 2026-04-27
+Last updated: 2026-06-12
 
 Purpose: explain project changes in language that another team member can read quickly. This is not a replacement for git history; it is the project story.
 
@@ -14,6 +14,7 @@ Purpose: explain project changes in language that another team member can read q
 | 2026-04-27 | Codex | Portfolio simulation | Added a budget-constrained portfolio simulator with cash, open positions, exposure limits, transaction costs, equity curve logging, and `portfolio/*` metrics. | Makes final economic evaluation more realistic than trade-exit compounding because concurrent positions now share one budget. | `uv run ruff check .`; `uv run pytest` passed. | `src/kvant/ml_framework/train/portfolio_simulator.py`; `src/kvant/ml_framework/train/evaluator.py`; `src/kvant/ml_framework/logging/wandb_logger.py`; `tests/test_portfolio_simulator.py`; `README.md` |
 | 2026-04-27 | Codex | Documentation and logging | Updated project descriptions, W&B metric inventory, method notes, AI log, and regenerated `Kvant_Project_Description.docx` around the current portfolio-first evaluation approach. | Keeps the team-facing documents aligned with the implemented pipeline and makes the Word project description readable for review. | `.docx` read-back with `python-docx`; `uv run ruff check .`; `uv run pytest` passed. | `README.md`; `docs/README.md`; `docs/source/index.md`; `docs/team_method.md`; `docs/ai_dialog_log.md`; `reports/Kvant_Project_Description.docx`; `src/kvant/ml_framework/train/metric_registry.py` |
 | 2026-04-28 | Codex | Experiment workflow | Added a dry-run-first CUSUM/barrier/meta-threshold grid runner for Conv1D-first calibration and gated ResNet-LSTM follow-up. | Makes the next experiment plan reproducible and prevents the project from jumping straight to larger models before label/sampling calibration. | `uv run python -m kvant.ml_framework.scripts.run_experiment_grid plan --max-runs 3`; focused tests and ruff passed. | `src/kvant/ml_framework/scripts/run_experiment_grid.py`; `tests/test_experiment_grid.py`; `README.md`; `reports/latest_experiment_analysis.md`; `reports/reference_implementation_matrix.md` |
+| 2026-06-12 | Codex | Default methodology reset | Reset the preparation defaults closer to the 2025 paper: fixed `2%` CUSUM, `5%` static Triple Barrier, `24`-period vertical barrier support, `L=96`, no default feature selection, and a `4`-quarter walk-forward warmup. | Gives the team one paper-aligned baseline again while keeping the repo's equity-specific differences explicit and reproducible. | Focused unit tests and documentation consistency pass; full prepared-data regeneration was not run in this turn. | `src/kvant/labelling.py`; `src/kvant/ml_prepare_data/labelling/tripple_bar.py`; `src/kvant/ml_prepare_data/prepare_experiment.py`; `src/kvant/kdata/hf_minute_data.py`; `src/kvant/ml_framework/train/backtest.py`; `src/kvant/ml_framework/train/evaluator.py`; `src/kvant/ml_framework/scripts/train_experiment.py`; `src/kvant/ml_framework/scripts/run_experiment_grid.py`; `README.md`; `docs/source/index.md`; `reports/*.md` |
 
 ## Entry Template
 

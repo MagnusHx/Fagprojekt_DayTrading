@@ -7,8 +7,8 @@ The project is built around reproducible walk-forward folds. Data preparation co
 ## Current pipeline
 
 1. Download/cache minute OHLCV shards from Hugging Face and build walk-forward splits of top-volume US equities.
-2. Fit a train-only `TunedCUSUMBarSampler` targeting a configurable bars-per-day density.
-3. Compute intraday technical features on minute bars before sampling, standardize them from train data, and select features for the primary side task with train-only F-score selection.
+2. Fit a train-only `FixedThresholdCUSUMBarSampler` using the paper-aligned default threshold `0.02`.
+3. Compute intraday technical features on minute bars before sampling and standardize them from train data. Optional train-only feature selection remains available as an ablation, but it is not part of the default baseline.
 4. Label sampled bars with triple-barrier outcomes and persist the canonical `event_outcome` label space.
 5. Enforce live-safe label and backtest timing: the sampled bar is the signal, trades enter on the next sampled bar, and label intervals crossing split boundaries are purged/embargoed.
 6. Train a primary side classifier on actionable `down/up` events while retaining `exit` rows for decision and abstention evaluation.
@@ -36,24 +36,32 @@ uv run ruff check .
 uv run python -m kvant.ml_prepare_data.prepare_experiment
 ```
 
-To prepare a fixed-threshold CUSUM ablation instead of the tuned bars/day sampler:
+To prepare a specific fixed-threshold CUSUM configuration explicitly:
 
 ```bash
-uv run python -m kvant.ml_prepare_data.prepare_experiment --sampler fixed_cusum --cusum-h 0.01
+uv run python -m kvant.ml_prepare_data.prepare_experiment --sampler fixed_cusum --cusum-h 0.02
 ```
 
+The default preparation entrypoint now uses a paper-aligned baseline:
+
+- fixed CUSUM threshold `0.02`
+- Triple Barrier height `5%`
+- vertical barrier `24` sampled periods
+- lookback window `96`
+- walk-forward warmup `4` quarters
+
 To set up the current CUSUM/barrier calibration grid, use the grid runner. It covers CUSUM thresholds
-`0.005`, `0.01`, `0.02`; barrier heights `0.005`, `0.01`, `0.015`; barrier widths `60`, `120`, `180`;
+`0.01`, `0.02`, `0.03`; barrier heights `0.025`, `0.05`, `0.06`; a fixed vertical barrier of `24` sampled periods;
 and meta thresholds `0.45`, `0.50`, `0.55`, `0.60`.
 
 ```bash
 # Write/print the full command plan without running it.
 uv run python -m kvant.ml_framework.scripts.run_experiment_grid plan
 
-# Prepare missing fold manifests for the 27 data configurations.
+# Prepare missing fold manifests for the 9 data configurations.
 uv run python -m kvant.ml_framework.scripts.run_experiment_grid prepare --execute
 
-# Run Conv1D first. Use --start-index/--max-runs to batch the 108 training commands.
+# Run Conv1D first. Use --start-index/--max-runs to batch the 36 training commands.
 uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d --execute --max-runs 4
 
 # After selecting promising Conv1D configs, create and edit the ResNet-LSTM follow-up list.
@@ -64,7 +72,7 @@ uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-resnet --e
 After preparing data, validate and train using the generated manifest:
 
 ```bash
-uv run python -m kvant.ml_framework.scripts.smoke_prepared_experiment --cv-manifest src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_cv_manifest.json
+uv run python -m kvant.ml_framework.scripts.smoke_prepared_experiment --cv-manifest src/kvant/ml_framework/prepared/sb_L_96_wp24_h5_fixedCUSUM0.02_cv_manifest.json
 uv run python -m kvant.ml_framework.scripts.train_experiment --baseline --epochs 3
 ```
 
@@ -103,7 +111,7 @@ uv run invoke main-cost \
 For a local smoke run without cloud logging:
 
 ```bash
-WANDB_MODE=offline uv run python -m kvant.ml_framework.scripts.train_experiment --exp-dir src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_fold00 --epochs 1 --no-return-stats
+WANDB_MODE=offline uv run python -m kvant.ml_framework.scripts.train_experiment --exp-dir src/kvant/ml_framework/prepared/sb_L_96_wp24_h5_fixedCUSUM0.02_fold00 --epochs 1 --no-return-stats
 ```
 
 On CUDA-enabled machines, keep the repo metadata generic and override PyTorch locally instead of committing a CUDA index to `pyproject.toml`. A one-off option is:
@@ -147,7 +155,7 @@ Portfolio curves are logged as `perf/portfolio_equity_curve/{split}` and `charts
 
 ## Notes
 
-The preferred prepared artifacts are the non-`droptexit` `event_outcome` folds, for example `sb_L_12_w180_h1.5_TBPD30_fold00` through `fold04`. Older `droptexit` artifacts are retained on disk for comparison, but the current training entrypoint expects raw three-class event-outcome artifacts and derives side/meta labels downstream.
+The preferred prepared artifacts are the non-`droptexit` `event_outcome` folds produced by the current paper-aligned defaults, for example `sb_L_96_wp24_h5_fixedCUSUM0.02_fold00`. Older `droptexit` and pre-reset artifacts are retained on disk for comparison, but the current training entrypoint expects raw three-class event-outcome artifacts and derives side/meta labels downstream.
 
 Prepared data, W&B runs, checkpoints, caches, generated plots, and generated architecture docs are intentionally ignored. They can be regenerated from the source code and commands above.
 

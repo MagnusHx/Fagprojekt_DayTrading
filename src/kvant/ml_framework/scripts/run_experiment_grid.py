@@ -10,9 +10,9 @@ from typing import Iterable, Literal
 from kvant.ml_prepare_data import prepared_data_root
 
 
-CUSUM_THRESHOLDS = (0.005, 0.01, 0.02)
-BARRIER_HEIGHTS = (0.005, 0.01, 0.015)
-BARRIER_WIDTHS = (60, 120, 180)
+CUSUM_THRESHOLDS = (0.01, 0.02, 0.03)
+BARRIER_HEIGHTS = (0.025, 0.05, 0.06)
+BARRIER_WIDTH_PERIODS = (24,)
 META_THRESHOLDS = (0.45, 0.50, 0.55, 0.60)
 
 PROMISING_TEMPLATE = Path("reports/promising_grid_configs.json")
@@ -22,7 +22,7 @@ PROMISING_TEMPLATE = Path("reports/promising_grid_configs.json")
 class GridConfig:
     cusum_h: float
     barrier_height: float
-    barrier_width: int
+    barrier_width_periods: int
 
     @property
     def barrier_height_pct(self) -> float:
@@ -33,7 +33,7 @@ class GridConfig:
     def label(self) -> str:
         """Return the prepared experiment label produced by prepare_experiment.py."""
         return (
-            f"sb_L_12_w{int(self.barrier_width)}_h{self.barrier_height_pct:g}_"
+            f"sb_L_96_wp{int(self.barrier_width_periods)}_h{self.barrier_height_pct:g}_"
             f"fixedCUSUM{float(self.cusum_h):g}"
         )
 
@@ -55,7 +55,7 @@ class GridRun:
         pieces = [
             "grid",
             self.model,
-            f"w{int(self.config.barrier_width)}",
+            f"wp{int(self.config.barrier_width_periods)}",
             f"bh{_fmt_token(self.config.barrier_height)}",
             f"ch{_fmt_token(self.config.cusum_h)}",
         ]
@@ -72,11 +72,11 @@ def iter_grid_configs() -> Iterable[GridConfig]:
     """Yield the full CUSUM/barrier calibration grid."""
     for cusum_h in CUSUM_THRESHOLDS:
         for barrier_height in BARRIER_HEIGHTS:
-            for barrier_width in BARRIER_WIDTHS:
+            for barrier_width_periods in BARRIER_WIDTH_PERIODS:
                 yield GridConfig(
                     cusum_h=float(cusum_h),
                     barrier_height=float(barrier_height),
-                    barrier_width=int(barrier_width),
+                    barrier_width_periods=int(barrier_width_periods),
                 )
 
 
@@ -92,8 +92,10 @@ def prepare_command(config: GridConfig) -> list[str]:
         "fixed_cusum",
         "--cusum-h",
         f"{config.cusum_h:g}",
-        "--barrier-width",
-        str(int(config.barrier_width)),
+        "--lookback",
+        "96",
+        "--barrier-width-periods",
+        str(int(config.barrier_width_periods)),
         "--barrier-height-pct",
         f"{config.barrier_height_pct:g}",
     ]
@@ -144,7 +146,7 @@ def load_promising_configs(path: Path) -> list[GridConfig]:
             GridConfig(
                 cusum_h=float(row["cusum_h"]),
                 barrier_height=float(row["barrier_height"]),
-                barrier_width=int(row["barrier_width"]),
+                barrier_width_periods=int(row.get("barrier_width_periods", row.get("barrier_width", 24))),
             )
         )
     return configs
@@ -156,8 +158,8 @@ def write_promising_template(path: Path) -> None:
     payload = {
         "description": "Fill this after the Conv1D grid. Keep only configurations worth testing with ResNet-LSTM.",
         "configs": [
-            {"cusum_h": 0.005, "barrier_height": 0.005, "barrier_width": 60},
-            {"cusum_h": 0.01, "barrier_height": 0.01, "barrier_width": 120},
+            {"cusum_h": 0.02, "barrier_height": 0.05, "barrier_width_periods": 24},
+            {"cusum_h": 0.03, "barrier_height": 0.06, "barrier_width_periods": 24},
         ],
     }
     path.write_text(json.dumps(payload, indent=2))
@@ -282,7 +284,7 @@ def main() -> None:
         "grid": {
             "cusum_thresholds": list(CUSUM_THRESHOLDS),
             "barrier_heights": list(BARRIER_HEIGHTS),
-            "barrier_widths": list(BARRIER_WIDTHS),
+            "barrier_width_periods": list(BARRIER_WIDTH_PERIODS),
             "meta_thresholds": list(META_THRESHOLDS),
         },
         "commands": [{"command": command} for command in selected],
