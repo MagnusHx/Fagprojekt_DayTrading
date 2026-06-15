@@ -915,7 +915,7 @@ def main():
         if args.sampler == "fixed_cusum":
             sampler = FixedThresholdCUSUMBarSampler(h=float(args.cusum_h), aggregate_ohlcv=True)
         elif args.sampler == "time_bar":
-            sampler = TimeBarSampler(bar_minutes=time_bar_minutes, aggregate_ohlcv=True)
+            sampler = TimeBarSampler(time_bar_minutes=time_bar_minutes)
         else:
             sampler = TunedCUSUMBarSampler(target_bars_per_day=TBPD, aggregate_ohlcv=True)
 
