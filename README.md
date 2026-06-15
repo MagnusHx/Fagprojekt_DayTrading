@@ -30,30 +30,30 @@ artifacts/                       Generated diagnostics, plots, checkpoints, and 
 
 ## Running the 8-Day Experiment Plan
 
-Follow the exact commands below to reproduce experiments E0–E5 from [experiment_plan_8day.md](reports/experiment_plan_8day.md).
+Follow the exact commands below to reproduce experiments E1–E4 from [experiment_plan_8day.md](reports/experiment_plan_8day.md), then E0 as a final summary.
 
 ### Overview
 
 Experiments answer four research questions via a ladder of comparisons:
-- **E0** (L0): Majority class + logistic regression baselines
-- **E1** (L1 & L2): Time bars vs CUSUM, RQ1
-- **E2** (L3): Model complexity (Conv1D vs ResNet-LSTM)
-- **E3** (L4): Selective trading / confidence thresholds, RQ3
-- **E4** (L5): Meta-selection ablation, RQ4
+- **E1** (L1 & L2): Time bars vs CUSUM, **RQ2** — Does information-driven sampling improve performance?
+- **E2** (L3): Model complexity (Conv1D vs ResNet-LSTM) — bonus insight
+- **E3** (L4): Selective trading / confidence thresholds, **RQ3** — Does selective trading improve risk-adjusted returns?
+- **E4** (L5): Meta-selection ablation, **RQ4** — Does meta-selection add value?
+- **E0** (RQ1, final summary): Can we translate the crypto method to stocks? Compare best model vs baselines.
 
 All use: seed `1337`, sequence length `12`, Conv1D (default), transaction cost `0.001`, all 5 folds (final runs).
-Fixed triple-barrier parameters: hb=2.5%, W=240 min (per Table 1, main experimental configuration).
+Fixed triple-barrier parameters: hb=2.5%, W=240 min.
 
 ### Running experiments in order
 
 Recommended sequence:
 
 1. **Prepare all data** (B1–B5): create E1_timebar, E1_cusum, E2 manifests (~20 min)
-2. **E0** (L0 floors): majority + logreg (~5 min)
-3. **E1** (L1 & L2, RQ1): E1-timebar + E1-cusum in parallel or sequential (~2 hours per arm, 5 folds)
-4. **E2** (L3, model complexity): E2-conv1d, then E2-resnet if E2-conv1d beats E0 (~2 hours)
-5. **E3** (L4, RQ3): threshold sweep on best E2 checkpoint (~30 min)
-6. **E4** (L5, RQ4): 3 meta ablation arms on same E2 manifest (~3 hours)
+2. **E1** (RQ2): E1-timebar + E1-cusum in parallel or sequential (~2 hours per arm, 5 folds)
+3. **E2** (Model complexity): E2-conv1d, then E2-resnet if E2-conv1d beats baselines (~2 hours)
+4. **E3** (RQ3): Threshold sweep on best E2 checkpoint (~30 min)
+5. **E4** (RQ4): 3 meta ablation arms on same E2 manifest (~3 hours)
+6. **E0** (RQ1, final): Compare best model from E1–E4 vs trivial baselines (~10 min)
 7. **Analysis**: aggregate results, run statistical comparisons, write report
 
 ### Prepare all data first (B1–B5 prerequisite)
@@ -62,21 +62,21 @@ Run these preparation steps once, then all experiments use the outputs:
 
 ```bash
 # Prepare E1-timebar data (B1+B2: time-bar sampler + next-bar labeler)
-uv run python -m kvant.ml_framework.scripts.prepare_experiment \
+uv run python -m kvant.ml_prepare_data.prepare_experiment \
   --sampler time_bar --time-bar-minutes 15 \
   --labeler next_bar \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json
 
 # Prepare E1-cusum data (CUSUM + triple-barrier with fixed params)
-uv run python -m kvant.ml_framework.scripts.prepare_experiment \
-  --sampler tuned_cusum --cusum-target-bars 30 \
-  --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
+uv run python -m kvant.ml_prepare_data.prepare_experiment \
+  --sampler tuned_cusum --target-bars-per-day 15 \
+  --labeler triple_barrier --barrier-height-pct 2.5 --barrier-width 240 \
   --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json
 
 # Prepare E2 data (same as E1-cusum)
-uv run python -m kvant.ml_framework.scripts.prepare_experiment \
-  --sampler tuned_cusum --cusum-target-bars 30 \
-  --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
+uv run python -m kvant.ml_prepare_data.prepare_experiment \
+  --sampler tuned_cusum --target-bars-per-day 15 \
+  --labeler triple_barrier --barrier-height-pct 2.5 --barrier-width 240 \
   --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json
 
 # Verify all build items exist
@@ -85,31 +85,11 @@ uv run python -m kvant.ml_framework.scripts.train_experiment --help | grep -q "n
 test -f scripts/reconcile_metrics.py && echo "✓ B5: reconcile_metrics.py"
 ```
 
-### E0: Floors (L0) — Table 1 in report
+### E1: RQ2 head-to-head (L1 vs L2) — Table 2 + equity curves
 
-Establishes baseline that all deep learning results must beat. Run after E1 data prep.
+**Does information-driven sampling + triple-barrier labeling improve performance?**
 
-```bash
-# E0-majority (uses same prepared data as E1-timebar)
-uv run python scripts/simple_baselines.py \
-  --model majority \
-  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
-  --output results/E0_majority.csv \
-  --wandb-project day-trading-experiments \
-  --wandb-name E0-majority
-
-# E0-logreg
-uv run python scripts/simple_baselines.py \
-  --model logreg \
-  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
-  --output results/E0_logreg.csv \
-  --wandb-project day-trading-experiments \
-  --wandb-name E0-logreg
-```
-
-### E1: RQ1 head-to-head (L1 vs L2) — Table 2 + equity curves
-
-Compare time bars (baseline) vs CUSUM + triple-barrier (advanced). Data prepared above.
+Compare time bars (simple baseline) vs CUSUM + triple-barrier (information-driven method). Same model (Conv1D), same features — only data pipeline differs. Data prepared above.
 
 ```bash
 # Train E1-timebar (all 5 folds)
@@ -170,7 +150,9 @@ uv run python scripts/reconcile_metrics.py \
 
 ### E4: Meta-selection ablation (RQ4) — Table 6
 
-Compare meta-selection ON vs OFF. All 5 folds.
+**Can a learned meta-model improve trade selection beyond simple thresholds?**
+
+Compare meta-selection ON vs OFF, and test feature importance. All 5 folds.
 
 ```bash
 # E4-nometa: Every signal, fixed bet size (no meta, no Kelly)
@@ -201,15 +183,44 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --log-portfolio-metrics --transaction-cost 0.001
 ```
 
+### E0: Final Summary (RQ1) — Table 1
+
+**Can we translate the crypto trading pipeline to US equities?**
+
+After E1–E4, compare your best model against trivial baselines:
+
+```bash
+# E0-majority: Predict majority class
+uv run python scripts/simple_baselines.py \
+  --model majority \
+  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
+  --wandb-project day-trading-experiments \
+  --wandb-name E0-majority
+
+# E0-logreg: Logistic regression (simple ML baseline)
+uv run python scripts/simple_baselines.py \
+  --model logreg \
+  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
+  --wandb-project day-trading-experiments \
+  --wandb-name E0-logreg
+```
+
+**Results summary:** Once E1–E4 are complete, create Table 1 by comparing:
+- E0-majority (worst baseline)
+- E0-logreg (simple ML baseline)
+- Best model from E1–E4 (e.g., E1-cusum if it beats E0-logreg, or E4-meta-full if meta adds value)
+
+**Interpretation:** If your best model beats E0-logreg **statistically significantly** (p < 0.05), RQ1 is answered YES — the method transfers to stocks.
+
 ### Results and reporting
 
-After all runs:
+After E1–E4 and E0:
 
 ```bash
 # Aggregate results from W&B
 wandb export --project day-trading-experiments --output results/wandb_export.json
 
-# Generate tables (aggregate per fold: mean ± std)
+# Generate tables (aggregate per fold: mean ± std, 95% CI)
 python scripts/generate_tables.py --all --output results/report_tables.csv
 
 # Verify all numbers against W&B
@@ -217,7 +228,7 @@ python scripts/verify_results.py --report results/report_tables.csv
 
 # Archive and commit
 git add reports/ results/
-git commit -m "Experiment E0-E5 complete: $(date +%Y-%m-%d)"
+git commit -m "Experiments E1-E4 + E0 complete: $(date +%Y-%m-%d)"
 ```
 
 ### Statistical analysis
@@ -225,20 +236,45 @@ git commit -m "Experiment E0-E5 complete: $(date +%Y-%m-%d)"
 All metrics are logged with **95% confidence intervals** computed across folds using t-distribution. To make statistical comparisons between experiments:
 
 ```bash
-# Compare E1-timebar vs E1-cusum with paired t-tests
+# RQ2: Does information-driven beat timebars?
 uv run python scripts/compare_experiments.py \
   --results-a results/E1_timebar.csv \
   --results-b results/E1_cusum.csv \
   --name-a "E1-timebar" \
   --name-b "E1-cusum" \
-  --metrics test_accuracy test_f1_macro paper/sharpe_ratio_annualized \
+  --metrics test_accuracy test_f1_macro portfolio/sharpe_ratio_annualized \
   --wandb-project day-trading-experiments \
   --wandb-name E1-comparison
 
-# Repeat for other comparisons:
-# - E0-majority vs E0-logreg
-# - E2-conv1d vs E2-resnet
-# - E1-cusum vs E2-conv1d (RQ2: economic value of model complexity)
+# Model complexity: Conv1D vs ResNet
+uv run python scripts/compare_experiments.py \
+  --results-a results/E2_conv1d.csv \
+  --results-b results/E2_resnet.csv \
+  --name-a "E2-conv1d" \
+  --name-b "E2-resnet" \
+  --metrics test_accuracy test_f1_macro portfolio/sharpe_ratio_annualized \
+  --wandb-project day-trading-experiments \
+  --wandb-name E2-comparison
+
+# RQ4: Does meta-selection add value?
+uv run python scripts/compare_experiments.py \
+  --results-a results/E4_nometa.csv \
+  --results-b results/E4_meta_full.csv \
+  --name-a "E4-nometa" \
+  --name-b "E4-meta-full" \
+  --metrics test_accuracy test_f1_macro portfolio/sharpe_ratio_annualized \
+  --wandb-project day-trading-experiments \
+  --wandb-name E4-meta-comparison
+
+# RQ1: Does our best model beat trivial baselines?
+uv run python scripts/compare_experiments.py \
+  --results-a results/E0_logreg.csv \
+  --results-b results/<BEST_MODEL>.csv \
+  --name-a "E0-logreg (baseline)" \
+  --name-b "E0-best (our method)" \
+  --metrics test_accuracy test_f1_macro portfolio/sharpe_ratio_annualized \
+  --wandb-project day-trading-experiments \
+  --wandb-name E0-final-comparison
 ```
 
 **Statistical outputs:**
@@ -246,9 +282,9 @@ uv run python scripts/compare_experiments.py \
 - **Paired t-tests**: p-value < 0.05 marks statistical significance (same folds, so paired)
 - **Mean difference**: effect size with 95% CI, lets you assess practical significance even when p > 0.05
 
-**Interpretation:** A metric is "signal" only if both:
-1. It beats the floor (E0) by a meaningful amount (practical significance)
-2. The difference is statistically significant (p < 0.05) across folds (not just noise)
+**Interpretation:** A finding is "signal" only if both:
+1. It is practically significant (beats the comparison by a meaningful amount)
+2. It is statistically significant (p < 0.05) across folds (not just noise)
 
 ## Common commands
 

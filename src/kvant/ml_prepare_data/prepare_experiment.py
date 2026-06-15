@@ -23,7 +23,9 @@ from kvant.labels import (
     pipeline_label_spaces_payload,
 )
 from kvant.ml_prepare_data.labelling.tripple_bar import Labeler, TripleBarrierLabeler
+from kvant.ml_prepare_data.labelling.next_bar import NextBarDirectionLabeler
 from kvant.ml_prepare_data.samplers.sampling import BaseBarSampler
+from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
 from kvant.ml_prepare_data.reporting import report_sampling_density, report_sampling_timeline
 from kvant.ml_prepare_data.samplers.sampler_cumsum import FixedThresholdCUSUMBarSampler, TunedCUSUMBarSampler
 from typing import Dict, Optional, List
@@ -864,27 +866,41 @@ def prepare_single_dataset(
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(description="Prepare walk-forward kvant experiment artifacts.")
-    parser.add_argument("--sampler", choices=("tuned_cusum", "fixed_cusum"), default="tuned_cusum")
+    parser.add_argument("--sampler", choices=("tuned_cusum", "fixed_cusum", "time_bar"), default="tuned_cusum")
     parser.add_argument("--target-bars-per-day", type=float, default=30.0)
+    parser.add_argument("--time-bar-minutes", type=int, default=15, help="Aggregate to k-minute bars (for --sampler time_bar)")
     parser.add_argument("--cusum-h", type=float, default=0.01)
     parser.add_argument("--lookback", type=int, default=12)
     parser.add_argument("--barrier-width", type=int, default=180)
     parser.add_argument("--barrier-height-pct", type=float, default=1.5)
+    parser.add_argument("--labeler", choices=("triple_barrier", "next_bar"), default="triple_barrier")
+    parser.add_argument("--cv-manifest", type=str, default=None, help="Path to write CV manifest JSON")
     args = parser.parse_args()
 
     downloaded_splits = get_huggingface_top_20_normal_splits()
 
     TBPD = float(args.target_bars_per_day)
     L, width, height_pct = int(args.lookback), int(args.barrier_width), float(args.barrier_height_pct)
-    # Keep raw triple-barrier event labels by default; the training pipeline now
-    # derives primary-side targets downstream and expects 3-class prepared artifacts.
-    drop_time_exit_label = False
-    label_suffix = "_droptexit" if drop_time_exit_label else ""
+    time_bar_minutes = int(args.time_bar_minutes)
+
+    # Sampler tag for label naming
     if args.sampler == "fixed_cusum":
         sampler_tag = f"fixedCUSUM{float(args.cusum_h):g}"
+    elif args.sampler == "time_bar":
+        sampler_tag = f"timebar{time_bar_minutes}m"
     else:
         sampler_tag = f"TBPD{TBPD:g}"
-    label = f"sb_L_{L}_w{width}_h{height_pct:g}_{sampler_tag}{label_suffix}"
+
+    # Labeler tag for label naming
+    if args.labeler == "next_bar":
+        labeler_tag = "nextbar"
+        drop_time_exit_label = False
+    else:
+        labeler_tag = f"h{height_pct:g}"
+        drop_time_exit_label = False
+
+    label_suffix = "_droptexit" if drop_time_exit_label else ""
+    label = f"sb_L_{L}_w{width}_{labeler_tag}_{sampler_tag}{label_suffix}"
     print(f"Writing to {label=}")
 
     from kvant.ml_prepare_data import prepared_data_root
@@ -895,10 +911,14 @@ def main():
         print(f"\nPreparing fold {fold_idx + 1}/{len(downloaded_splits)}")
         ticker_data_train, ticker_data_val, ticker_data_test = get_ticker_data(split)
 
+        # Instantiate sampler
         if args.sampler == "fixed_cusum":
             sampler = FixedThresholdCUSUMBarSampler(h=float(args.cusum_h), aggregate_ohlcv=True)
+        elif args.sampler == "time_bar":
+            sampler = TimeBarSampler(bar_minutes=time_bar_minutes, aggregate_ohlcv=True)
         else:
             sampler = TunedCUSUMBarSampler(target_bars_per_day=TBPD, aggregate_ohlcv=True)
+
         base_fe = IntradayTA10Features(
             volume_output="log1p",
             include_time_features=True,
@@ -907,9 +927,14 @@ def main():
         )
         fe = StandardizedFeatures(base=base_fe)
         feature_selector = PrimarySideFScoreSelector(top_k=16)
-        labeler = TripleBarrierLabeler(
-            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=drop_time_exit_label
-        )
+
+        # Instantiate labeler
+        if args.labeler == "next_bar":
+            labeler = NextBarDirectionLabeler(name=label)
+        else:
+            labeler = TripleBarrierLabeler(
+                name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=drop_time_exit_label
+            )
 
         cfg = ExperimentConfig(
             experiment_name="exp_minimal_sep_components",
@@ -949,7 +974,13 @@ def main():
             }
         )
 
-    manifest_path = prepared_data_root / f"{label}_cv_manifest.json"
+    # Use --cv-manifest if provided, otherwise use default naming
+    if args.cv_manifest:
+        manifest_path = Path(args.cv_manifest)
+    else:
+        manifest_path = prepared_data_root / f"{label}_cv_manifest.json"
+
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps({"label": label, "n_folds": len(cv_rows), "folds": cv_rows}, indent=2))
     print(f"Wrote CV manifest to {manifest_path}")
 
