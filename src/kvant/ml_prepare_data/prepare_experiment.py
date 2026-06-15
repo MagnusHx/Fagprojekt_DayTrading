@@ -309,6 +309,8 @@ def _fit_feature_selector_on_train(
     selector_y: list[np.ndarray] = []
     feature_names_ref: list[str] | None = None
 
+    from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
+
     for ticker in tqdm.tqdm(tickers_train, desc="Fitting feature selector", dynamic_ncols=True):
         dft = minute_train_chunks.get(ticker)
         if dft is None or len(dft) == 0:
@@ -319,14 +321,19 @@ def _fit_feature_selector_on_train(
             continue
         dft_s = ensure_utc_sorted_index(dft_s)
 
-        X_full, feat_names = fe.transform(dft)
+        # TimeBarSampler requires features computed on resampled bars
+        if isinstance(sampler, TimeBarSampler):
+            X_full, feat_names = fe.transform(dft_s)
+            X_sampled = X_full
+        else:
+            X_full, feat_names = fe.transform(dft)
+            feat_df_full = pd.DataFrame(X_full, index=dft.index, columns=feat_names)
+            X_sampled = feat_df_full.loc[dft_s.index].to_numpy(dtype=np.float32, copy=False)
+
         if feature_names_ref is None:
             feature_names_ref = list(feat_names)
         elif list(feat_names) != feature_names_ref:
             raise RuntimeError("Feature names changed between train chunks during feature-selection fit.")
-
-        feat_df_full = pd.DataFrame(X_full, index=dft.index, columns=feat_names)
-        X_sampled = feat_df_full.loc[dft_s.index].to_numpy(dtype=np.float32, copy=False)
         y_sampled, _ = labeler.transform(dft_s)
         valid_pos = valid_target_positions(y_sampled, lookback_L)
         if len(valid_pos) == 0:
@@ -541,14 +548,34 @@ def prepare_experiment(
 
     # 4) Fit FE on minute train data, then fit the labeler on sampled train bars.
     print(f"[{exp_id}] Fitting feature engineer and labeler...")
-    if hasattr(fe, "fit_many"):
-        fe.fit_many(minute_train_chunks[ticker] for ticker in tickers_train if ticker in minute_train_chunks)
+    # For TimeBarSampler, fit feature engineer on resampled bars (not minute bars)
+    # to match the bar resolution used during transform
+    from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
+    if isinstance(sampler, TimeBarSampler):
+        # Resample training chunks first
+        resampled_train_chunks = []
+        for ticker in tickers_train:
+            dft = minute_train_chunks.get(ticker)
+            if dft is not None and len(dft) > 0:
+                dft_r = sampler.transform(dft, ticker=ticker)
+                if dft_r is not None and len(dft_r) > 0:
+                    resampled_train_chunks.append(dft_r)
+        if hasattr(fe, "fit_many"):
+            fe.fit_many(resampled_train_chunks)
+        else:
+            df_fit_resampled = pd.concat(resampled_train_chunks, axis=0) if resampled_train_chunks else pd.DataFrame()
+            if len(df_fit_resampled) > 0:
+                fe.fit(df_fit_resampled)
     else:
-        df_fit_minute = pd.concat(
-            [minute_train_chunks[ticker] for ticker in tickers_train if ticker in minute_train_chunks],
-            axis=0,
-        )
-        fe.fit(df_fit_minute)
+        # For other samplers, fit on minute data
+        if hasattr(fe, "fit_many"):
+            fe.fit_many(minute_train_chunks[ticker] for ticker in tickers_train if ticker in minute_train_chunks)
+        else:
+            df_fit_minute = pd.concat(
+                [minute_train_chunks[ticker] for ticker in tickers_train if ticker in minute_train_chunks],
+                axis=0,
+            )
+            fe.fit(df_fit_minute)
 
     for ticker in tqdm.tqdm(tickers_train, desc="Sampling train chunks", dynamic_ncols=True):
         dft = minute_train_chunks.get(ticker)
@@ -615,21 +642,32 @@ def prepare_experiment(
         df1 = sampler.transform(df_full_raw, ticker=t)
         df1 = ensure_utc_sorted_index(df1)
 
-        # Features are computed on the full minute-resolution dataframe first,
-        # then sampled at the timestamps selected by the sampler.
-        X_full, feat_names = fe.transform(df_full_raw)
-        if feature_selector is not None:
-            X_full, feat_names = feature_selector.transform(X_full, feat_names)
-        feat_df_full = pd.DataFrame(X_full, index=df_full_raw.index, columns=feat_names)
-        try:
-            feat_df_sampled = feat_df_full.loc[df1.index]
-        except KeyError as exc:
-            missing = sorted(set(df1.index).difference(set(feat_df_full.index)))
-            missing_preview = [str(x) for x in missing[:5]]
-            raise RuntimeError(
-                f"Sampled timestamps for {t} were not found in the minute-resolution feature dataframe. "
-                f"Examples: {missing_preview}"
-            ) from exc
+        # TimeBarSampler requires features computed on resampled bars (not minute bars)
+        # since the resampled timestamps don't align with minute boundaries.
+        # Other samplers select from minute bars, so features computed on full minute data
+        # can be indexed by sampler timestamps.
+        from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
+        if isinstance(sampler, TimeBarSampler):
+            # For time bars: compute features on resampled OHLCV
+            X_full, feat_names = fe.transform(df1)
+            if feature_selector is not None:
+                X_full, feat_names = feature_selector.transform(X_full, feat_names)
+            feat_df_sampled = pd.DataFrame(X_full, index=df1.index, columns=feat_names)
+        else:
+            # For other samplers: compute on minute data, sample by timestamp
+            X_full, feat_names = fe.transform(df_full_raw)
+            if feature_selector is not None:
+                X_full, feat_names = feature_selector.transform(X_full, feat_names)
+            feat_df_full = pd.DataFrame(X_full, index=df_full_raw.index, columns=feat_names)
+            try:
+                feat_df_sampled = feat_df_full.loc[df1.index]
+            except KeyError as exc:
+                missing = sorted(set(df1.index).difference(set(feat_df_full.index)))
+                missing_preview = [str(x) for x in missing[:5]]
+                raise RuntimeError(
+                    f"Sampled timestamps for {t} were not found in the minute-resolution feature dataframe. "
+                    f"Examples: {missing_preview}"
+                ) from exc
 
         X = feat_df_sampled.to_numpy(dtype=np.float32, copy=False)
         y, y_meta = labeler.transform(df1)
