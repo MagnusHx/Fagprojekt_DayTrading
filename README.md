@@ -36,24 +36,24 @@ Follow the exact commands below to reproduce experiments E0–E5 from [experimen
 
 Experiments answer four research questions via a ladder of comparisons:
 - **E0** (L0): Majority class + logistic regression baselines
-- **E1** (L1 & L2): Time bars vs CUSUM, RQ1 (E2 label-sweep deleted)
-- **E3** (L3): Model complexity (Conv1D vs ResNet-LSTM)
-- **E4** (L4): Selective trading / confidence thresholds, RQ3
-- **E5** (L5): Meta-selection ablation, RQ4
+- **E1** (L1 & L2): Time bars vs CUSUM, RQ1
+- **E2** (L3): Model complexity (Conv1D vs ResNet-LSTM)
+- **E3** (L4): Selective trading / confidence thresholds, RQ3
+- **E4** (L5): Meta-selection ablation, RQ4
 
 All use: seed `1337`, sequence length `12`, Conv1D (default), transaction cost `0.001`, all 5 folds (final runs).
 Fixed triple-barrier parameters: hb=2.5%, W=240 min (per Table 1, main experimental configuration).
 
 ### Running experiments in order
 
-Recommended sequence (note: E2 deleted, so we skip from E1 to E3):
+Recommended sequence:
 
-1. **Prepare all data** (B1–B5): create E1_timebar, E1_cusum, E3 manifests (~20 min)
+1. **Prepare all data** (B1–B5): create E1_timebar, E1_cusum, E2 manifests (~20 min)
 2. **E0** (L0 floors): majority + logreg (~5 min)
 3. **E1** (L1 & L2, RQ1): E1-timebar + E1-cusum in parallel or sequential (~2 hours per arm, 5 folds)
-4. **E3** (L3, model complexity): E3-conv1d, then E3-resnet if E3-conv1d beats E0 (~2 hours)
-5. **E4** (L4, RQ3): threshold sweep on best E3 checkpoint (~30 min)
-6. **E5** (L5, RQ4): 3 meta ablation arms on same E3 manifest (~3 hours)
+4. **E2** (L3, model complexity): E2-conv1d, then E2-resnet if E2-conv1d beats E0 (~2 hours)
+5. **E3** (L4, RQ3): threshold sweep on best E2 checkpoint (~30 min)
+6. **E4** (L5, RQ4): 3 meta ablation arms on same E2 manifest (~3 hours)
 7. **Analysis**: aggregate results, run statistical comparisons, write report
 
 ### Prepare all data first (B1–B5 prerequisite)
@@ -73,11 +73,11 @@ uv run python -m kvant.ml_framework.scripts.prepare_experiment \
   --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
   --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json
 
-# Prepare E3 data (same as E1-cusum)
+# Prepare E2 data (same as E1-cusum)
 uv run python -m kvant.ml_framework.scripts.prepare_experiment \
   --sampler tuned_cusum --cusum-target-bars 30 \
   --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
-  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json
+  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json
 
 # Verify all build items exist
 test -f scripts/simple_baselines.py && echo "✓ B3: simple_baselines.py"
@@ -129,75 +129,75 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --log-portfolio-metrics --transaction-cost 0.001
 ```
 
-### E3: Model complexity (L3) — Table 4
+### E2: Model complexity (L3) — Table 4
 
 Trains Conv1D and optionally ResNet-LSTM. All 5 folds. Data prepared above.
 
 ```bash
-# E3-conv1d (mandatory)
+# E2-conv1d (mandatory)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
-  --output-dir artifacts/E3_conv1d \
-  --wandb-name E3-conv1d \
+  --output-dir artifacts/E2_conv1d \
+  --wandb-name E2-conv1d \
   --log-portfolio-metrics --transaction-cost 0.001
 
-# E3-resnet (only if E3-conv1d validation F1 > E0-logreg)
+# E2-resnet (only if E2-conv1d validation F1 > E0-logreg)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model resnet_lstm --epochs 30 --seed 1337 \
-  --output-dir artifacts/E3_resnet \
-  --wandb-name E3-resnet \
+  --output-dir artifacts/E2_resnet \
+  --wandb-name E2-resnet \
   --log-portfolio-metrics --transaction-cost 0.001
 ```
 
-### E4: Selective trading / confidence thresholds (RQ3) — Table 5 + figure
+### E3: Selective trading / confidence thresholds (RQ3) — Table 5 + figure
 
-No retraining. Use best E3 checkpoint, sweep thresholds {0.0, 0.55, 0.65}.
+No retraining. Use best E2 checkpoint, sweep thresholds {0.0, 0.55, 0.65}.
 
 ```bash
-# Determine E3_BEST_CHECKPOINT from W&B (highest test Sharpe or lowest drawdown)
-export E3_BEST_CHECKPOINT=artifacts/E3_conv1d/best_checkpoint.pth
+# Determine E2_BEST_CHECKPOINT from W&B (highest test Sharpe or lowest drawdown)
+export E2_BEST_CHECKPOINT=artifacts/E2_conv1d/best_checkpoint.pth
 
 # Threshold sweep at eval time (via reconcile_metrics.py)
 uv run python scripts/reconcile_metrics.py \
-  --checkpoint ${E3_BEST_CHECKPOINT} \
+  --checkpoint ${E2_BEST_CHECKPOINT} \
   --thresholds 0.0 0.55 0.65 \
-  --output results/E4_threshold_sweep.csv \
+  --output results/E3_threshold_sweep.csv \
   --wandb-project day-trading-experiments \
-  --wandb-name E4-threshold-sweep
+  --wandb-name E3-threshold-sweep
 ```
 
-### E5: Meta-selection ablation (RQ4) — Table 6
+### E4: Meta-selection ablation (RQ4) — Table 6
 
 Compare meta-selection ON vs OFF. All 5 folds.
 
 ```bash
-# E5-nometa: Every signal, fixed bet size (no meta, no Kelly)
+# E4-nometa: Every signal, fixed bet size (no meta, no Kelly)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
   --no-meta --bet-size fixed \
-  --output-dir artifacts/E5_nometa \
-  --wandb-name E5-nometa \
+  --output-dir artifacts/E4_nometa \
+  --wandb-name E4-nometa \
   --log-portfolio-metrics --transaction-cost 0.001
 
-# E5-meta-min: Meta with minimal feature set (proba, embedding)
+# E4-meta-min: Meta with minimal feature set (proba, embedding)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
   --meta-features proba,embedding \
-  --output-dir artifacts/E5_meta_min \
-  --wandb-name E5-meta-min \
+  --output-dir artifacts/E4_meta_min \
+  --wandb-name E4-meta-min \
   --log-portfolio-metrics --transaction-cost 0.001
 
-# E5-meta-full: Meta with full feature set (default)
+# E4-meta-full: Meta with full feature set (default)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
   --meta-features default \
-  --output-dir artifacts/E5_meta_full \
-  --wandb-name E5-meta-full \
+  --output-dir artifacts/E4_meta_full \
+  --wandb-name E4-meta-full \
   --log-portfolio-metrics --transaction-cost 0.001
 ```
 
@@ -237,8 +237,8 @@ uv run python scripts/compare_experiments.py \
 
 # Repeat for other comparisons:
 # - E0-majority vs E0-logreg
-# - E3-conv1d vs E3-resnet
-# - E1-cusum vs E3-conv1d (RQ2: economic value of model complexity)
+# - E2-conv1d vs E2-resnet
+# - E1-cusum vs E2-conv1d (RQ2: economic value of model complexity)
 ```
 
 **Statistical outputs:**
