@@ -320,7 +320,7 @@ def get_huggingface_top_5_small_splits():
     return get_huggingface_top_n_tiny_splits(n=5, warmup_quarters=8)
 
 def get_huggingface_top_20_normal_splits():
-    return get_huggingface_top_n_tiny_splits(n=20, warmup_quarters=16)
+    return get_huggingface_top_n_tiny_splits(n=20, warmup_quarters=4)
 
 
 def get_huggingface_top_200_normal_splits():

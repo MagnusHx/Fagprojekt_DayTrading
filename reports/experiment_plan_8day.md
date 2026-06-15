@@ -83,7 +83,7 @@ Same model (Conv1D), same features, same folds. Only bars + labels differ.
 | Run | Sampler | Labels |
 | --- | --- | --- |
 | `E1-timebar` | time_bar 15 min | next-bar direction |
-| `E1-cusum` | tuned CUSUM, 30 bars/day | triple-barrier (calibrated, see E2) |
+| `E1-cusum` | tuned CUSUM, 30 bars/day | triple-barrier (hb=2.5%, W=240 min) |
 
 Prepare each, then:
 
@@ -96,30 +96,9 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
 Record: accuracy, f1_macro, and `portfolio/*`: CAGR (annual net P/L), Sharpe, cumulative
 return, max drawdown. This is the direct RQ1/RQ2 answer.
 
-### E2 — Label/sampling calibration (fixes the failed sweep) — feeds Report Table 3 (appendix)
-
-The previous sweep failed and the existing artifact is time-exit dominated (AAPL: 18,603
-exit vs 1,864 down / 1,671 up at h=1.5%, w=120). The barrier height is too large for
-intraday equity vol. Re-run a **reduced** grid with smaller heights, on HPC, screening with
-1 fold + Conv1D + 5 epochs:
-
-| Parameter | Values |
-| --- | --- |
-| barrier height | 0.3%, 0.5%, 0.75% |
-| barrier width | 60, 120 min |
-| sampler | tuned CUSUM 30/day (fixed; do not also sweep bars/day) |
-
-That is 6 preps + 6 short trainings — fits one 24h HPC job using the existing
-`run_experiment_grid.py` / `hpc_label_sweep.sh` machinery (update the `HEIGHTS` array).
-
-**Selection criterion (important):** pick the config by (a) exit-label fraction < 60%, and
-(b) most positive *gross* (pre-cost) average trade return on validation — **not** by meta
-F1. If gross edge is negative everywhere, pick the most balanced config and say so in the
-report; the RQ comparisons remain valid.
-
 ### E3 — Model complexity (L3) — feeds Report Table 4
 
-Only on the E2 winner, all 5 folds:
+Same CUSUM + triple-barrier config (h=0.5%, w=120 min), all 5 folds:
 
 | Run | Model |
 | --- | --- |
@@ -161,12 +140,12 @@ Feature sensitivity = E5-meta-min vs E5-meta-full. That is RQ4 answered.
 
 | Day | Date | Work | Gate at end of day |
 | --- | --- | --- | --- |
-| 1 | Fri 12 Jun | B1+B2 (time-bar sampler + next-bar labeler, with tests). Kick off E2 grid on HPC tonight. | `prepare_experiment --sampler time_bar --labeler next_bar` produces a valid manifest; HPC job queued |
-| 2 | Sat 13 Jun | B3 (simple baselines) → run E0. B4 (`--no-meta`). Regenerate clean prepared folds from current source (the on-disk artifact is stale / mis-nested under `Fagprojekt_DayTrading/`). | Table 1 numbers exist |
-| 3 | Sun 14 Jun | Collect E2 results, pick winning label config. Run `E1-timebar` (all folds). | E2 winner chosen with stated criterion |
-| 4 | Mon 15 Jun | Run `E1-cusum` = `E3-conv1d` (same run, all 5 folds, full return stats). Start `E3-resnet` on HPC. | Table 2 + equity curves exist |
-| 5 | Tue 16 Jun | B5 (threshold sweep) → E4. Start E5 runs. | Table 5 + RQ3 figure exist |
-| 6 | Wed 17 Jun | Finish E5. Assemble all tables/figures, per-fold mean ± std. | Tables 4 & 6 exist |
+| 1 | Fri 12 Jun | B1+B2 (time-bar sampler + next-bar labeler, with tests). Prepare E1 manifests. | `prepare_experiment --sampler time_bar --labeler next_bar` produces valid manifest |
+| 2 | Sat 13 Jun | B3 (simple baselines) → run E0. B4 (`--no-meta`). Prepare E1-cusum and E3 manifests. | Table 1 (E0) numbers exist |
+| 3 | Sun 14 Jun | Run `E1-timebar` (all 5 folds, full return stats). | Table 2a (E1-timebar) exists |
+| 4 | Mon 15 Jun | Run `E1-cusum` and `E3-conv1d` (same manifest, all 5 folds, full return stats). | Table 2b (E1-cusum) + Table 4a (E3-conv1d) + equity curves exist |
+| 5 | Tue 16 Jun | E3-resnet (if E3-conv1d beats E0-logreg). B5 (threshold sweep) → E4. | Table 4b (E3-resnet, optional) + Table 5 (E4) exist |
+| 6 | Wed 17 Jun | Run E5 (all 3 arms, all 5 folds). Assemble all tables/figures, per-fold mean ± std. | Table 6 (E5) exists |
 | 7 | Thu 18 Jun | Buffer for reruns/failures. Write results & discussion sections from the tables. | Draft results chapter |
 | 8 | Fri 19 Jun | Polish report, sanity-check every number against W&B, archive run IDs in `reports/`. | Done |
 
@@ -177,16 +156,17 @@ E5-meta-full. Never cut E0, E1, or E4 — they carry RQ1–RQ3.
 
 | Research question | Experiments | Deliverable |
 | --- | --- | --- |
-| RQ1: do information-driven bars + triple-barrier beat time bars + next-bar direction? | E0, E1 (+E2 appendix) | Tables 1–3, equity-curve figure |
+| RQ1: do information-driven bars + triple-barrier beat time bars + next-bar direction? | E0, E1 | Tables 1–2, equity-curve figure |
 | RQ2: predictive + economic comparison | E1, E3 | Tables 2, 4 (acc/F1 + CAGR/Sharpe/cum-return/MDD) |
 | RQ3: does selective trading improve risk-adjusted returns? | E4 | Table 5, frequency-vs-Sharpe figure |
 | RQ4: incremental value of meta-selection + sensitivity? | E5 | Table 6 |
 
 ## Standing rules for every final run
 
-1. All 5 walk-forward folds; report mean ± std across folds.
+1. All 5 walk-forward folds; report mean ± std + **95% confidence intervals** across folds.
 2. No `--no-return-stats` — we need `portfolio/*` for every economic claim.
 3. Use `portfolio/*` (strict simulator) for conclusions; `paper/*` is diagnostic only.
 4. Fixed seed, identical features/lookback across compared arms; one variable changes at a time.
 5. Tune thresholds on validation, report on test.
 6. Every table cell in the report carries a W&B run name from this file.
+7. **Statistical significance:** For every comparison (E1 vs E0, E3 vs E1, etc.), report p-value from paired t-test. A difference is "signal" only if both practically significant AND statistically significant (p < 0.05).

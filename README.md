@@ -28,6 +28,228 @@ references/                      Source papers used by reports
 artifacts/                       Generated diagnostics, plots, checkpoints, and smoke reports (ignored)
 ```
 
+## Running the 8-Day Experiment Plan
+
+Follow the exact commands below to reproduce experiments E0–E5 from [experiment_plan_8day.md](reports/experiment_plan_8day.md).
+
+### Overview
+
+Experiments answer four research questions via a ladder of comparisons:
+- **E0** (L0): Majority class + logistic regression baselines
+- **E1** (L1 vs L2): Time bars vs CUSUM, RQ1
+- **E3** (L3): Model complexity (Conv1D vs ResNet-LSTM)
+- **E4** (L4): Selective trading / confidence thresholds, RQ3
+- **E5** (L5): Meta-selection ablation, RQ4
+
+All use: seed `1337`, sequence length `12`, Conv1D (default), transaction cost `0.001`, all 5 folds (final runs).
+Fixed triple-barrier parameters: hb=2.5%, W=240 min (per Table 1, main experimental configuration).
+
+### Build prerequisites (B1–B5)
+
+These must exist before running any experiment. Verify:
+
+```bash
+# B1+B2: Time-bar sampler and next-bar labeler
+uv run python -m kvant.ml_framework.scripts.prepare_experiment \
+  --sampler time_bar --time-bar-minutes 15 \
+  --labeler next_bar \
+  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json
+
+# B3: Simple baselines script exists
+test -f scripts/simple_baselines.py || echo "Missing B3: create scripts/simple_baselines.py"
+
+# B4: --no-meta flag in train_experiment
+uv run python -m kvant.ml_framework.scripts.train_experiment --help | grep -q "no-meta"
+
+# B5: Threshold sweep at eval time (via reconcile_metrics or evaluator extension)
+test -f scripts/reconcile_metrics.py || echo "Missing B5: create threshold sweep script"
+```
+
+### E0: Floors (L0) — Table 1 in report
+
+Establishes baseline that all deep learning results must beat.
+
+```bash
+# E0-majority
+uv run python scripts/simple_baselines.py \
+  --model majority \
+  --prepared-data src/kvant/ml_framework/prepared \
+  --output results/E0_majority.csv \
+  --wandb-project day-trading-experiments \
+  --wandb-name E0-majority
+
+# E0-logreg
+uv run python scripts/simple_baselines.py \
+  --model logreg \
+  --prepared-data src/kvant/ml_framework/prepared \
+  --output results/E0_logreg.csv \
+  --wandb-project day-trading-experiments \
+  --wandb-name E0-logreg
+```
+
+### E1: RQ1 head-to-head (L1 vs L2) — Table 2 + equity curves
+
+Compare time bars (baseline) vs CUSUM + triple-barrier (advanced).
+
+```bash
+# Step 1: Prepare data for both arms
+# L1: Time-bar baseline (15-min bars)
+uv run python -m kvant.ml_framework.scripts.prepare_experiment \
+  --sampler time_bar --time-bar-minutes 15 \
+  --labeler next_bar \
+  --output-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json
+
+# L2: CUSUM + triple-barrier (fixed: hb=2.5%, W=240 min)
+uv run python -m kvant.ml_framework.scripts.prepare_experiment \
+  --sampler tuned_cusum --cusum-target-bars 30 \
+  --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
+  --output-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json
+
+# Step 2: Train E1-timebar (all 5 folds)
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
+  --model conv1d --epochs 20 --seed 1337 \
+  --output-dir artifacts/E1_timebar \
+  --wandb-name E1-timebar \
+  --log-portfolio-metrics --transaction-cost 0.001
+
+# Step 3: Train E1-cusum (all 5 folds)
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json \
+  --model conv1d --epochs 20 --seed 1337 \
+  --output-dir artifacts/E1_cusum \
+  --wandb-name E1-cusum \
+  --log-portfolio-metrics --transaction-cost 0.001
+```
+
+### E3: Model complexity (L3) — Table 4
+
+Trains Conv1D and optionally ResNet-LSTM. All 5 folds. Uses fixed triple-barrier parameters.
+
+```bash
+# Prepare data (fixed: h=0.5%, w=120 min)
+uv run python -m kvant.ml_framework.scripts.prepare_experiment \
+  --sampler tuned_cusum --cusum-target-bars 30 \
+  --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
+  --output-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json
+
+# E3-conv1d (mandatory)
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --model conv1d --epochs 20 --seed 1337 \
+  --output-dir artifacts/E3_conv1d \
+  --wandb-name E3-conv1d \
+  --log-portfolio-metrics --transaction-cost 0.001
+
+# E3-resnet (only if E3-conv1d validation F1 > E0-logreg)
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --model resnet_lstm --epochs 30 --seed 1337 \
+  --output-dir artifacts/E3_resnet \
+  --wandb-name E3-resnet \
+  --log-portfolio-metrics --transaction-cost 0.001
+```
+
+### E4: Selective trading / confidence thresholds (RQ3) — Table 5 + figure
+
+No retraining. Use best E3 checkpoint, sweep thresholds {0.0, 0.55, 0.65}.
+
+```bash
+# Determine E3_BEST_CHECKPOINT from W&B (highest test Sharpe or lowest drawdown)
+export E3_BEST_CHECKPOINT=artifacts/E3_conv1d/best_checkpoint.pth
+
+# Threshold sweep at eval time (via B5 reconcile_metrics or evaluator extension)
+for threshold in 0.0 0.55 0.65; do
+  uv run python -m kvant.ml_framework.scripts.evaluate_checkpoint \
+    --checkpoint ${E3_BEST_CHECKPOINT} \
+    --confidence-threshold ${threshold} \
+    --output results/E4_threshold_${threshold}.csv \
+    --wandb-name E4-threshold-${threshold}
+done
+```
+
+### E5: Meta-selection ablation (RQ4) — Table 6
+
+Compare meta-selection ON vs OFF. All 5 folds.
+
+```bash
+# E5-nometa: Every signal, fixed bet size (no meta, no Kelly)
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --model conv1d --epochs 20 --seed 1337 \
+  --no-meta --bet-size fixed \
+  --output-dir artifacts/E5_nometa \
+  --wandb-name E5-nometa \
+  --log-portfolio-metrics --transaction-cost 0.001
+
+# E5-meta-min: Meta with minimal feature set (proba, embedding)
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --model conv1d --epochs 20 --seed 1337 \
+  --meta-features proba,embedding \
+  --output-dir artifacts/E5_meta_min \
+  --wandb-name E5-meta-min \
+  --log-portfolio-metrics --transaction-cost 0.001
+
+# E5-meta-full: Meta with full feature set (default)
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
+  --model conv1d --epochs 20 --seed 1337 \
+  --meta-features default \
+  --output-dir artifacts/E5_meta_full \
+  --wandb-name E5-meta-full \
+  --log-portfolio-metrics --transaction-cost 0.001
+```
+
+### Results and reporting
+
+After all runs:
+
+```bash
+# Aggregate results from W&B
+wandb export --project day-trading-experiments --output results/wandb_export.json
+
+# Generate tables (aggregate per fold: mean ± std)
+python scripts/generate_tables.py --all --output results/report_tables.csv
+
+# Verify all numbers against W&B
+python scripts/verify_results.py --report results/report_tables.csv
+
+# Archive and commit
+git add reports/ results/
+git commit -m "Experiment E0-E5 complete: $(date +%Y-%m-%d)"
+```
+
+### Statistical analysis
+
+All metrics are logged with **95% confidence intervals** computed across folds using t-distribution. To make statistical comparisons between experiments:
+
+```bash
+# Compare E1-timebar vs E1-cusum with paired t-tests
+uv run python scripts/compare_experiments.py \
+  --results-a results/E1_timebar.csv \
+  --results-b results/E1_cusum.csv \
+  --name-a "E1-timebar" \
+  --name-b "E1-cusum" \
+  --metrics test_accuracy test_f1_macro paper/sharpe_ratio_annualized \
+  --wandb-project day-trading-experiments \
+  --wandb-name E1-comparison
+
+# Repeat for other comparisons:
+# - E0-majority vs E0-logreg
+# - E3-conv1d vs E3-resnet
+# - E1-cusum vs E3-conv1d (RQ2: economic value of model complexity)
+```
+
+**Statistical outputs:**
+- **95% CI**: logged to W&B for each metric (e.g., `{metric}/ci_lower`, `{metric}/ci_upper`)
+- **Paired t-tests**: p-value < 0.05 marks statistical significance (same folds, so paired)
+- **Mean difference**: effect size with 95% CI, lets you assess practical significance even when p > 0.05
+
+**Interpretation:** A metric is "signal" only if both:
+1. It beats the floor (E0) by a meaningful amount (practical significance)
+2. The difference is statistically significant (p < 0.05) across folds (not just noise)
+
 ## Common commands
 
 ```bash

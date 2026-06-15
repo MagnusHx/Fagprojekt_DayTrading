@@ -237,6 +237,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
     p.add_argument(
+        "--no-meta",
+        action="store_true",
+        help="Disable meta-label decision layer; act on every primary signal with fixed bet size (E5 nometa arm).",
+    )
+    p.add_argument(
         "--meta-accept-threshold",
         type=float,
         default=0.5,
@@ -277,7 +282,12 @@ def parse_args() -> argparse.Namespace:
             "or pass --exp-dir/--cv-manifest explicitly."
         )
     args.wandb_name = _auto_wandb_name(args, run_cv=_should_run_cv(args))
-    args.meta_features = _parse_meta_features(args.meta_features)
+    # Handle --no-meta: disable all meta features
+    if getattr(args, "no_meta", False):
+        args.meta_features = ()
+        args.meta_accept_threshold = 0.0
+    else:
+        args.meta_features = _parse_meta_features(args.meta_features)
     if not (0.0 <= args.meta_accept_threshold <= 1.0):
         raise SystemExit("--meta-accept-threshold must be between 0 and 1.")
     if args.kelly_fraction < 0.0:
