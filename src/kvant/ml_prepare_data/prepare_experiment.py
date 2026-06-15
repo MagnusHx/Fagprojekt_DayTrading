@@ -921,6 +921,8 @@ def main():
 
     from kvant.ml_prepare_data import prepared_data_root
 
+    from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
+
     cv_rows = []
     last_prepared = None
     for fold_idx, split in enumerate(downloaded_splits):
@@ -937,7 +939,6 @@ def main():
 
         # For TimeBarSampler, indicators need to account for 15-min bar structure
         # For other samplers, use 1-min (default)
-        from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
         data_bar_minutes = time_bar_minutes if isinstance(sampler, TimeBarSampler) else 1
 
         base_fe = IntradayTA10Features(
