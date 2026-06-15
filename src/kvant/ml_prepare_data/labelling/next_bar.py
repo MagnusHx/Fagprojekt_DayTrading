@@ -35,7 +35,9 @@ class NextBarDirectionLabeler:
 
     def transform(self, df: pd.DataFrame) -> tuple[np.ndarray, list[Optional[dict]]]:
         df = ensure_utc_sorted_index(df)
-        labels = np.full(len(df), -1, dtype=np.int8)
+        # Use 0/1/2 format (down/exit/up) matching triple-barrier convention
+        # Last bar gets label 0 (down) since there's no next bar to compare
+        labels = np.zeros(len(df), dtype=np.int8)
         metadata: list[Optional[dict]] = [None] * len(df)
 
         if "close" not in df.columns:
@@ -47,13 +49,14 @@ class NextBarDirectionLabeler:
             current_close = closes[i]
             next_close = closes[i + 1]
 
-            # Direction: +1 (up), -1 (down), 0 (flat)
+            # Direction: 1 (up), 0 (down), 1 (flat → up)
             if next_close > current_close:
                 label = 1
             elif next_close < current_close:
-                label = -1
-            else:
                 label = 0
+            else:
+                # Flat/no change → treat as up
+                label = 1
 
             labels[i] = label
 
@@ -66,7 +69,6 @@ class NextBarDirectionLabeler:
                 "label": int(label),
             }
 
-        # Last bar: no next bar, label stays -1
-        # metadata[len(df) - 1] = None
+        # Last bar: no next bar, label stays 0 (down)
 
         return labels, metadata
