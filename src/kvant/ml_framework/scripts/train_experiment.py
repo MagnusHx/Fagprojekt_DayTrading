@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from kvant.labels import SIDE_LABEL_DOWN, SIDE_LABEL_UP
 from kvant.ml_framework.run_validation import (
     git_commit_or_none,
     validate_cv_manifest,
@@ -483,6 +484,21 @@ def _runtime_metadata(args: argparse.Namespace, *, exp_dir: Path, fold_tag: str 
     }
 
 
+def _validate_primary_side_train_labels(exp: PreparedExperiment) -> None:
+    side_labels = exp.store.side_labels_for_index(exp.index_train)
+    side_labels = side_labels[side_labels >= 0]
+    counts = {
+        SIDE_LABEL_DOWN: int(np.sum(side_labels == SIDE_LABEL_DOWN)),
+        SIDE_LABEL_UP: int(np.sum(side_labels == SIDE_LABEL_UP)),
+    }
+    if counts[SIDE_LABEL_DOWN] == 0 or counts[SIDE_LABEL_UP] == 0:
+        raise RuntimeError(
+            "Primary-side training requires both down and up labels after mapping event labels to side labels. "
+            f"Got counts down={counts[SIDE_LABEL_DOWN]}, up={counts[SIDE_LABEL_UP]}. "
+            "If this was prepared with --labeler next_bar before the label fix, regenerate the prepared experiment."
+        )
+
+
 def run_single_fold(
     args: argparse.Namespace,
     exp_dir: Path,
@@ -518,6 +534,7 @@ def run_single_fold(
 
     # Optional local sanity check
     ds_train, ds_val, ds_test = exp.get_primary_side_datasets()
+    _validate_primary_side_train_labels(exp)
 
     if args.print_dataset_summary:
         for ds, split_name in [(ds_train, "train"), (ds_val, "val"), (ds_test, "test")]:

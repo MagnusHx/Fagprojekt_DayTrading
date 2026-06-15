@@ -33,7 +33,7 @@ def test_trainer_only_runs_expensive_metrics_on_full_evaluation_epochs() -> None
         evaluator=evaluator,
         logger=logger,
     )
-    trainer.train_one_epoch = lambda loader: 0.5
+    trainer.train_one_epoch = lambda loader, **kwargs: 0.5
     loss_calls = []
     trainer.mean_loss = lambda loader: loss_calls.append(loader.name) or 0.25
 

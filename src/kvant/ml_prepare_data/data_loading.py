@@ -232,14 +232,48 @@ class PreparedStore:
             out[i] = float(np.log(curr_close / prev_close))
         return out
 
+    def _prepared_last_volatility_values(self, tids: np.ndarray, tpos: np.ndarray, *, window: int = 20) -> np.ndarray:
+        """Estimate last realized close-to-close volatility from persisted market data."""
+        out = np.zeros(len(tids), dtype=np.float32)
+        for i, (tid, pos) in enumerate(zip(tids, tpos)):
+            row_idx = int(pos) - 1
+            if row_idx < 0:
+                raise RuntimeError(
+                    f"Cannot read prepared_last:volatility for ticker id {int(tid)} at position {int(pos)}."
+                )
+
+            market_data = self.require_market_data(int(tid))
+            close = np.asarray(market_data["close"], dtype=np.float64)
+            if row_idx >= len(close):
+                raise RuntimeError(
+                    f"Prepared market data for ticker {self.ticker(int(tid))} is shorter than features at row {row_idx}."
+                )
+            if row_idx == 0:
+                out[i] = 0.0
+                continue
+
+            start = max(1, row_idx - int(window) + 1)
+            prev_close = close[start - 1 : row_idx]
+            curr_close = close[start : row_idx + 1]
+            valid = (prev_close > 0.0) & (curr_close > 0.0)
+            if not np.any(valid):
+                out[i] = 0.0
+                continue
+
+            log_returns = np.log(curr_close[valid] / prev_close[valid])
+            out[i] = float(np.std(log_returns, ddof=0))
+        return out
+
     def prepared_last_feature_values(self, tids: np.ndarray, tpos: np.ndarray, feature_name: str) -> np.ndarray:
         feature_name = str(feature_name).strip()
-        if feature_name in {"recent_return", "recent_return_feature"}:
+        if feature_name in {"recent_return", "recent_return_feature", "volatility", "volatility_feature"}:
             try:
                 feature_idx = self.feature_index(feature_name)
             except RuntimeError as exc:
                 if "could not be resolved" not in str(exc):
                     raise
+                if feature_name in {"volatility", "volatility_feature"}:
+                    return self._prepared_last_volatility_values(tids=tids, tpos=tpos)
                 return self._prepared_last_recent_return_values(tids=tids, tpos=tpos)
             out = np.empty(len(tids), dtype=np.float32)
             for i, (tid, pos) in enumerate(zip(tids, tpos)):

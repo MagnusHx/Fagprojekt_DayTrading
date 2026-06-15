@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -111,11 +112,14 @@ class ExperimentEvaluator:
         )
 
     def _fit_meta_model(self, pred_out: Dict[str, Any]) -> LogisticMetaLabeler:
+        started_at = time.time()
+        print(f"eval: fitting meta model on {len(pred_out['tid'])} train predictions...", flush=True)
         meta_model = LogisticMetaLabeler(
             feature_tokens=self.cfg.meta_features,
             random_state=int(self.cfg.meta_random_state),
         )
         meta_model.fit(pred_out=pred_out, store=self.store)
+        print(f"eval: fitted meta model in {time.time() - started_at:.1f}s", flush=True)
         return meta_model
 
     def _event_labels_for_pred_out(self, pred_out: Dict[str, Any]) -> np.ndarray:
@@ -342,7 +346,10 @@ class ExperimentEvaluator:
                 continue
             if loader is None or len(loader.dataset) == 0:
                 continue
+            started_at = time.time()
+            print(f"eval: predicting {split} split ({len(loader.dataset)} rows)...", flush=True)
             pred_out_by_split[split] = predict(model, loader, self.device)
+            print(f"eval: predicted {split} split in {time.time() - started_at:.1f}s", flush=True)
 
         meta_model = self._fit_meta_model(pred_out_by_split["train"])
 
@@ -356,6 +363,8 @@ class ExperimentEvaluator:
             pred_out = pred_out_by_split.get(split)
             if pred_out is None:
                 continue
+            started_at = time.time()
+            print(f"eval: scoring {split} split ({len(pred_out['tid'])} rows)...", flush=True)
             take_proba = meta_model.predict_take_proba(pred_out=pred_out, store=self.store)
             metrics, rows, cm, profit_curve = self._evaluate_pred_out(
                 split,
@@ -373,6 +382,7 @@ class ExperimentEvaluator:
                 profit_curves.append(profit_curve)
             if portfolio_curve is not None:
                 portfolio_curves.append(portfolio_curve)
+            print(f"eval: scored {split} split in {time.time() - started_at:.1f}s", flush=True)
 
         if detailed:
             all_metrics["_per_ticker_rows"] = rows_out

@@ -1,7 +1,12 @@
 import argparse
 import json
+from types import SimpleNamespace
 
-from kvant.labels import label_semantics_payload
+import numpy as np
+import pytest
+import torch
+
+from kvant.labels import SIDE_LABEL_DOWN, label_semantics_payload
 from kvant.ml_framework.scripts.train_experiment import (
     _apply_baseline_preset,
     _auto_wandb_name,
@@ -9,10 +14,10 @@ from kvant.ml_framework.scripts.train_experiment import (
     _compatible_default_manifest,
     _device_status_message,
     _parse_meta_features,
+    _validate_primary_side_train_labels,
     _should_run_cv,
     parse_args,
 )
-import torch
 
 
 def test_recommended_training_defaults(monkeypatch, tmp_path) -> None:
@@ -169,3 +174,15 @@ def test_device_status_message_for_cpu() -> None:
     out = _device_status_message(torch.device("cpu"))
 
     assert out == "Using device: cpu (CUDA not available)"
+
+
+def test_validate_primary_side_train_labels_rejects_single_effective_class() -> None:
+    exp = SimpleNamespace(
+        index_train=np.asarray([[0, 1], [0, 2]], dtype=np.int64),
+        store=SimpleNamespace(
+            side_labels_for_index=lambda index: np.full(len(index), SIDE_LABEL_DOWN, dtype=np.int64),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="requires both down and up labels"):
+        _validate_primary_side_train_labels(exp)

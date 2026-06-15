@@ -248,6 +248,40 @@ def test_logistic_meta_labeler_derives_recent_return_when_feature_is_not_persist
     )
 
 
+def test_logistic_meta_labeler_derives_volatility_when_feature_is_not_persisted(tmp_path) -> None:
+    exp = _write_prepared_fixture(tmp_path, feature_names=["cos_wday", "f1", "f2"])
+    ticker_dir = exp.exp_dir / "tickers" / "AAA"
+    market_data = np.asarray(
+        [
+            [100.0, 101.0, 99.0, 100.0, 1.0],
+            [100.0, 102.0, 99.0, 110.0, 1.0],
+            [110.0, 112.0, 109.0, 115.0, 1.0],
+            [115.0, 122.0, 114.0, 125.0, 1.0],
+            [125.0, 126.0, 120.0, 123.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    np.save(ticker_dir / "market_data.npy", market_data)
+    exp = PreparedExperiment(exp.exp_dir)
+    pred_out = {
+        "tid": np.asarray([0, 0], dtype=np.int64),
+        "tpos": np.asarray([2, 3], dtype=np.int64),
+        "y_pred": np.asarray([1, 0], dtype=np.int64),
+        "y_pred_proba": np.asarray([[0.2, 0.8], [0.55, 0.45]], dtype=np.float64),
+        "y_logits": np.asarray([[0.0, 2.0], [0.2, 0.1]], dtype=np.float64),
+        "y_embedding": np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64),
+    }
+    policy = LogisticMetaLabeler()
+
+    X = policy.build_feature_matrix(pred_out=pred_out, store=exp.store)
+
+    expected_second = np.std(
+        np.asarray([np.log(110.0 / 100.0), np.log(115.0 / 110.0)], dtype=np.float64),
+        ddof=0,
+    )
+    np.testing.assert_allclose(X[:, 4], np.asarray([0.0, expected_second], dtype=np.float64), rtol=1e-6)
+
+
 def test_logistic_meta_labeler_requires_persisted_feature_names(tmp_path) -> None:
     exp = _write_prepared_fixture(tmp_path, feature_names=None)
     pred_out = {
