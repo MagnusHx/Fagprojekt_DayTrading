@@ -36,7 +36,7 @@ Follow the exact commands below to reproduce experiments E0–E5 from [experimen
 
 Experiments answer four research questions via a ladder of comparisons:
 - **E0** (L0): Majority class + logistic regression baselines
-- **E1** (L1 vs L2): Time bars vs CUSUM, RQ1
+- **E1** (L1 & L2): Time bars vs CUSUM, RQ1 (E2 label-sweep deleted)
 - **E3** (L3): Model complexity (Conv1D vs ResNet-LSTM)
 - **E4** (L4): Selective trading / confidence thresholds, RQ3
 - **E5** (L5): Meta-selection ablation, RQ4
@@ -46,14 +46,14 @@ Fixed triple-barrier parameters: hb=2.5%, W=240 min (per Table 1, main experimen
 
 ### Running experiments in order
 
-Recommended sequence (can skip/reorder based on gatekeeping rules):
+Recommended sequence (note: E2 deleted, so we skip from E1 to E3):
 
 1. **Prepare all data** (B1–B5): create E1_timebar, E1_cusum, E3 manifests (~20 min)
-2. **E0** (floors): majority + logreg (~5 min)
-3. **E1** (RQ1): E1-timebar + E1-cusum in parallel or sequential (~2 hours per arm, 5 folds)
-4. **E3** (model complexity): E3-conv1d, then E3-resnet if E3-conv1d beats E0 (~2 hours)
-5. **E4** (thresholds): sweep on best E3 checkpoint (~30 min)
-6. **E5** (meta ablation): 3 arms on same E3 manifest (~3 hours)
+2. **E0** (L0 floors): majority + logreg (~5 min)
+3. **E1** (L1 & L2, RQ1): E1-timebar + E1-cusum in parallel or sequential (~2 hours per arm, 5 folds)
+4. **E3** (L3, model complexity): E3-conv1d, then E3-resnet if E3-conv1d beats E0 (~2 hours)
+5. **E4** (L4, RQ3): threshold sweep on best E3 checkpoint (~30 min)
+6. **E5** (L5, RQ4): 3 meta ablation arms on same E3 manifest (~3 hours)
 7. **Analysis**: aggregate results, run statistical comparisons, write report
 
 ### Prepare all data first (B1–B5 prerequisite)
