@@ -44,36 +44,56 @@ Experiments answer four research questions via a ladder of comparisons:
 All use: seed `1337`, sequence length `12`, Conv1D (default), transaction cost `0.001`, all 5 folds (final runs).
 Fixed triple-barrier parameters: hb=2.5%, W=240 min (per Table 1, main experimental configuration).
 
-### Build prerequisites (B1–B5)
+### Running experiments in order
 
-These must exist before running any experiment. Verify:
+Recommended sequence (can skip/reorder based on gatekeeping rules):
+
+1. **Prepare all data** (B1–B5): create E1_timebar, E1_cusum, E3 manifests (~20 min)
+2. **E0** (floors): majority + logreg (~5 min)
+3. **E1** (RQ1): E1-timebar + E1-cusum in parallel or sequential (~2 hours per arm, 5 folds)
+4. **E3** (model complexity): E3-conv1d, then E3-resnet if E3-conv1d beats E0 (~2 hours)
+5. **E4** (thresholds): sweep on best E3 checkpoint (~30 min)
+6. **E5** (meta ablation): 3 arms on same E3 manifest (~3 hours)
+7. **Analysis**: aggregate results, run statistical comparisons, write report
+
+### Prepare all data first (B1–B5 prerequisite)
+
+Run these preparation steps once, then all experiments use the outputs:
 
 ```bash
-# B1+B2: Time-bar sampler and next-bar labeler
+# Prepare E1-timebar data (B1+B2: time-bar sampler + next-bar labeler)
 uv run python -m kvant.ml_framework.scripts.prepare_experiment \
   --sampler time_bar --time-bar-minutes 15 \
   --labeler next_bar \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json
 
-# B3: Simple baselines script exists
-test -f scripts/simple_baselines.py || echo "Missing B3: create scripts/simple_baselines.py"
+# Prepare E1-cusum data (CUSUM + triple-barrier with fixed params)
+uv run python -m kvant.ml_framework.scripts.prepare_experiment \
+  --sampler tuned_cusum --cusum-target-bars 30 \
+  --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
+  --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json
 
-# B4: --no-meta flag in train_experiment
-uv run python -m kvant.ml_framework.scripts.train_experiment --help | grep -q "no-meta"
+# Prepare E3 data (same as E1-cusum)
+uv run python -m kvant.ml_framework.scripts.prepare_experiment \
+  --sampler tuned_cusum --cusum-target-bars 30 \
+  --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
+  --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json
 
-# B5: Threshold sweep at eval time (via reconcile_metrics or evaluator extension)
-test -f scripts/reconcile_metrics.py || echo "Missing B5: create threshold sweep script"
+# Verify all build items exist
+test -f scripts/simple_baselines.py && echo "✓ B3: simple_baselines.py"
+uv run python -m kvant.ml_framework.scripts.train_experiment --help | grep -q "no-meta" && echo "✓ B4: --no-meta flag"
+test -f scripts/reconcile_metrics.py && echo "✓ B5: reconcile_metrics.py"
 ```
 
 ### E0: Floors (L0) — Table 1 in report
 
-Establishes baseline that all deep learning results must beat.
+Establishes baseline that all deep learning results must beat. Run after E1 data prep.
 
 ```bash
-# E0-majority
+# E0-majority (uses same prepared data as E1-timebar)
 uv run python scripts/simple_baselines.py \
   --model majority \
-  --prepared-data src/kvant/ml_framework/prepared \
+  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --output results/E0_majority.csv \
   --wandb-project day-trading-experiments \
   --wandb-name E0-majority
@@ -81,7 +101,7 @@ uv run python scripts/simple_baselines.py \
 # E0-logreg
 uv run python scripts/simple_baselines.py \
   --model logreg \
-  --prepared-data src/kvant/ml_framework/prepared \
+  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --output results/E0_logreg.csv \
   --wandb-project day-trading-experiments \
   --wandb-name E0-logreg
@@ -89,23 +109,10 @@ uv run python scripts/simple_baselines.py \
 
 ### E1: RQ1 head-to-head (L1 vs L2) — Table 2 + equity curves
 
-Compare time bars (baseline) vs CUSUM + triple-barrier (advanced).
+Compare time bars (baseline) vs CUSUM + triple-barrier (advanced). Data prepared above.
 
 ```bash
-# Step 1: Prepare data for both arms
-# L1: Time-bar baseline (15-min bars)
-uv run python -m kvant.ml_framework.scripts.prepare_experiment \
-  --sampler time_bar --time-bar-minutes 15 \
-  --labeler next_bar \
-  --output-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json
-
-# L2: CUSUM + triple-barrier (fixed: hb=2.5%, W=240 min)
-uv run python -m kvant.ml_framework.scripts.prepare_experiment \
-  --sampler tuned_cusum --cusum-target-bars 30 \
-  --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
-  --output-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json
-
-# Step 2: Train E1-timebar (all 5 folds)
+# Train E1-timebar (all 5 folds)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
@@ -113,7 +120,7 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --wandb-name E1-timebar \
   --log-portfolio-metrics --transaction-cost 0.001
 
-# Step 3: Train E1-cusum (all 5 folds)
+# Train E1-cusum (all 5 folds) — can run in parallel
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
@@ -124,15 +131,9 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
 
 ### E3: Model complexity (L3) — Table 4
 
-Trains Conv1D and optionally ResNet-LSTM. All 5 folds. Uses fixed triple-barrier parameters.
+Trains Conv1D and optionally ResNet-LSTM. All 5 folds. Data prepared above.
 
 ```bash
-# Prepare data (fixed: h=0.5%, w=120 min)
-uv run python -m kvant.ml_framework.scripts.prepare_experiment \
-  --sampler tuned_cusum --cusum-target-bars 30 \
-  --labeler triple_barrier --barrier-height 0.025 --barrier-width 240 \
-  --output-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json
-
 # E3-conv1d (mandatory)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E3_cv_manifest.json \
@@ -158,14 +159,13 @@ No retraining. Use best E3 checkpoint, sweep thresholds {0.0, 0.55, 0.65}.
 # Determine E3_BEST_CHECKPOINT from W&B (highest test Sharpe or lowest drawdown)
 export E3_BEST_CHECKPOINT=artifacts/E3_conv1d/best_checkpoint.pth
 
-# Threshold sweep at eval time (via B5 reconcile_metrics or evaluator extension)
-for threshold in 0.0 0.55 0.65; do
-  uv run python -m kvant.ml_framework.scripts.evaluate_checkpoint \
-    --checkpoint ${E3_BEST_CHECKPOINT} \
-    --confidence-threshold ${threshold} \
-    --output results/E4_threshold_${threshold}.csv \
-    --wandb-name E4-threshold-${threshold}
-done
+# Threshold sweep at eval time (via reconcile_metrics.py)
+uv run python scripts/reconcile_metrics.py \
+  --checkpoint ${E3_BEST_CHECKPOINT} \
+  --thresholds 0.0 0.55 0.65 \
+  --output results/E4_threshold_sweep.csv \
+  --wandb-project day-trading-experiments \
+  --wandb-name E4-threshold-sweep
 ```
 
 ### E5: Meta-selection ablation (RQ4) — Table 6
