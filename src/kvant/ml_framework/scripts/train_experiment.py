@@ -38,6 +38,24 @@ default_project = os.environ.get("WANDB_PROJECT", "Kvant")
 entity = os.environ.get("WANDB_ENTITY", "s245509-danmarks-tekniske-universitet-dtu")
 
 
+RESULT_METRICS = {
+    "test_accuracy": "test/classification/accuracy",
+    "test_f1_macro": "test/classification/f1_macro",
+    "test_meta_f1": "test/meta/f1",
+    "test_take_rate": "test/meta/take_rate",
+    "test_trade_signal_rate": "test/decision/trade_signal_rate",
+    "test_directional_acted_accuracy": "test/decision/directional_acted_accuracy",
+    "test_portfolio_total_return_pct": "test/portfolio/total_return_pct",
+    "test_portfolio_sharpe_ratio_annualized": "test/portfolio/sharpe_ratio_annualized",
+    "test_portfolio_max_drawdown_pct": "test/portfolio/max_drawdown_pct",
+    "test_portfolio_annualized_return_pct": "test/portfolio/annualized_return_pct",
+    "test_portfolio_average_trade_return_pct": "test/portfolio/average_trade_return_pct",
+    "test_portfolio_n_executed_trades": "test/portfolio/n_executed_trades",
+    "test_paper_net_return_total_pct": "test/paper/executed_trade_net_return_total_pct",
+    "test_paper_sharpe_ratio_annualized": "test/paper/sharpe_ratio_annualized",
+}
+
+
 def _apply_baseline_preset(args: argparse.Namespace) -> argparse.Namespace:
     """Apply the baseline preset."""
     if not getattr(args, "baseline", False):
@@ -271,6 +289,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--checkpoint-out-dir", type=Path, default=Path("artifacts/checkpoints"))
     p.add_argument(
+        "--results-out",
+        type=Path,
+        default=None,
+        help="Optional CSV path for per-fold CV results. Defaults to results/<wandb-name>.csv for CV runs.",
+    )
+    p.add_argument(
         "--no-save-best-checkpoint",
         action="store_true",
         help="Disable writing a local best-checkpoint bundle for offline metric reconciliation.",
@@ -459,6 +483,66 @@ def _write_json_artifact(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2))
 
 
+def _result_stem(args: argparse.Namespace, manifest_path: Path | None = None) -> str:
+    raw = str(getattr(args, "wandb_name", None) or "")
+    if not raw and manifest_path is not None:
+        raw = Path(manifest_path).stem
+    if not raw:
+        raw = "training_results"
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._-")
+    return stem or "training_results"
+
+
+def _default_results_path(args: argparse.Namespace, manifest_path: Path | None = None) -> Path:
+    return Path("results") / f"{_result_stem(args, manifest_path)}.csv"
+
+
+def _manifest_results_path(manifest_path: Path) -> Path:
+    stem = Path(manifest_path).stem
+    for suffix in ("_cv_manifest", "-cv-manifest", "_manifest", "-manifest"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", stem).strip("._-") or Path(manifest_path).stem
+    return Path("results") / f"{stem}.csv"
+
+
+def _fold_result_row(fold_idx: int, metrics: dict) -> dict[str, float | int | None]:
+    row: dict[str, float | int | None] = {"fold": int(fold_idx)}
+    for out_name, metric_name in RESULT_METRICS.items():
+        value = metrics.get(metric_name)
+        row[out_name] = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return row
+
+
+def _write_cv_results_csv(path: Path, rows: list[dict[str, float | int | None]]) -> None:
+    import csv
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["fold", *RESULT_METRICS.keys()]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Wrote CV fold results to {path}", flush=True)
+
+
+def _write_default_cv_result_csvs(
+    *,
+    args: argparse.Namespace,
+    manifest_path: Path,
+    rows: list[dict[str, float | int | None]],
+) -> None:
+    primary_path = Path(args.results_out) if args.results_out is not None else _default_results_path(args, manifest_path)
+    _write_cv_results_csv(primary_path, rows)
+    if args.results_out is not None:
+        return
+
+    manifest_path_out = _manifest_results_path(manifest_path)
+    if manifest_path_out != primary_path:
+        _write_cv_results_csv(manifest_path_out, rows)
+
+
 def _runtime_metadata(args: argparse.Namespace, *, exp_dir: Path, fold_tag: str | None, preflight: dict) -> dict:
     label_regime = preflight.get("label_regime")
     return {
@@ -504,7 +588,7 @@ def run_single_fold(
     exp_dir: Path,
     fold_tag: str | None = None,
     logger: WandbLogger | None = None,
-) -> float:
+) -> dict:
     preflight = validate_prepared_experiment(exp_dir, require_market_data=not args.no_return_stats).to_jsonable()
     runtime_dir = Path("artifacts/run_debug") / Path(exp_dir).name
     _write_json_artifact(runtime_dir / "preflight.json", preflight)
@@ -678,7 +762,11 @@ def run_single_fold(
             detailed=True,
         )
         logger.child(namespace="best").log(best_metrics, step=args.epochs + 1)
-        return float(out["best_metric"])
+        fold_idx = int(str(fold_tag).removeprefix("fold")) if fold_tag is not None else 0
+        return {
+            "best_metric": float(out["best_metric"]),
+            "result_row": _fold_result_row(fold_idx, best_metrics),
+        }
     finally:
         if owns_logger:
             logger.stop()
@@ -709,6 +797,7 @@ def main() -> None:
 
         try:
             bests = []
+            result_rows = []
             steps_per_fold = args.epochs + 2
             for i, fold in enumerate(folds):
                 fold_idx = int(fold["fold_idx"])
@@ -721,8 +810,10 @@ def main() -> None:
                 fold_logger.log_config({"fold_seed": fold_seed})
                 fold_args = argparse.Namespace(**vars(args))
                 fold_args.seed = fold_seed
-                best_metric = run_single_fold(fold_args, exp_dir=exp_dir, fold_tag=fold_tag, logger=fold_logger)
+                fold_result = run_single_fold(fold_args, exp_dir=exp_dir, fold_tag=fold_tag, logger=fold_logger)
+                best_metric = float(fold_result["best_metric"])
                 bests.append(best_metric)
+                result_rows.append(fold_result["result_row"])
                 root_logger.log(
                     {f"summary/{fold_tag}/best_val_meta_f1": float(best_metric)}, step=(i + 1) * steps_per_fold
                 )
@@ -742,6 +833,7 @@ def main() -> None:
             print(f"  folds={len(bests)}", flush=True)
             print(f"  best val/meta/f1 mean={mean_best:.6f}", flush=True)
             print(f"  best val/meta/f1 std={std_best:.6f}", flush=True)
+            _write_default_cv_result_csvs(args=args, manifest_path=resolved_manifest_path, rows=result_rows)
             return
         finally:
             root_logger.stop()

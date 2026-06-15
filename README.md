@@ -90,6 +90,8 @@ test -f scripts/reconcile_metrics.py && echo "✓ B5: reconcile_metrics.py"
 **Does information-driven sampling + triple-barrier labeling improve performance?**
 
 Compare time bars (simple baseline) vs CUSUM + triple-barrier (information-driven method). Same model (Conv1D), same features — only data pipeline differs. Data prepared above.
+Completed CV training runs automatically write per-fold result CSVs to `results/`, including names derived from the
+manifest such as `results/E1_timebar.csv` and `results/E1_cusum.csv`. Override this with `--results-out` if needed.
 
 ```bash
 # Train E1-timebar (all 5 folds)

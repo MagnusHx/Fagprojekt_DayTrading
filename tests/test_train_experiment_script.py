@@ -1,5 +1,6 @@
 import argparse
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,7 +13,10 @@ from kvant.ml_framework.scripts.train_experiment import (
     _auto_wandb_name,
     _compatible_default_exp_dir,
     _compatible_default_manifest,
+    _default_results_path,
     _device_status_message,
+    _fold_result_row,
+    _manifest_results_path,
     _parse_meta_features,
     _validate_primary_side_train_labels,
     _should_run_cv,
@@ -31,6 +35,7 @@ def test_recommended_training_defaults(monkeypatch, tmp_path) -> None:
     assert args.kelly_fraction == 0.25
     assert args.portfolio_max_position_fraction == 0.02
     assert args.meta_accept_threshold == 0.5
+    assert args.results_out is None
 
 
 def test_baseline_preset_forces_conv1d_and_zero_cost() -> None:
@@ -186,3 +191,35 @@ def test_validate_primary_side_train_labels_rejects_single_effective_class() -> 
 
     with pytest.raises(RuntimeError, match="requires both down and up labels"):
         _validate_primary_side_train_labels(exp)
+
+
+def test_default_results_path_uses_wandb_name() -> None:
+    args = argparse.Namespace(wandb_name="E1-timebar")
+
+    out = _default_results_path(args, None)
+
+    assert str(out) == "results/E1-timebar.csv"
+
+
+def test_manifest_results_path_strips_cv_manifest_suffix() -> None:
+    out = _manifest_results_path(Path("src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json"))
+
+    assert str(out) == "results/E1_timebar.csv"
+
+
+def test_fold_result_row_extracts_comparison_metrics() -> None:
+    row = _fold_result_row(
+        2,
+        {
+            "test/classification/accuracy": 0.51,
+            "test/meta/f1": 0.42,
+            "test/portfolio/total_return_pct": -0.1,
+            "test/not_exported": 123,
+        },
+    )
+
+    assert row["fold"] == 2
+    assert row["test_accuracy"] == 0.51
+    assert row["test_meta_f1"] == 0.42
+    assert row["test_portfolio_total_return_pct"] == -0.1
+    assert "test/not_exported" not in row
