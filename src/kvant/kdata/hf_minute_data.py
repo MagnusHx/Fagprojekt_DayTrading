@@ -135,7 +135,10 @@ def available_datasets(first_year=2015, warmup_quarters=16):
     steps = avail_quarters - warmup_quarters
     datasets_configurations = []
 
-    for k in range(steps):
+    # Limit to 5 folds for experiments
+    num_folds = min(steps, 5)
+
+    for k in range(num_folds):
         q_train = [k + i for i in range(warmup_quarters) ]
         q_val = [k + 0 + warmup_quarters]
         q_test = [k + 1 + warmup_quarters]
