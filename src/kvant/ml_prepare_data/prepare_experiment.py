@@ -309,6 +309,8 @@ def _fit_feature_selector_on_train(
     selector_y: list[np.ndarray] = []
     feature_names_ref: list[str] | None = None
 
+    from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
+
     for ticker in tqdm.tqdm(tickers_train, desc="Fitting feature selector", dynamic_ncols=True):
         dft = minute_train_chunks.get(ticker)
         if dft is None or len(dft) == 0:
@@ -319,11 +321,16 @@ def _fit_feature_selector_on_train(
             continue
         dft_s = ensure_utc_sorted_index(dft_s)
 
-        # Compute features on minute data, then sample at sampler timestamps
-        # This ensures robust feature selection regardless of sampler type
+        # Compute features on minute data
         X_full, feat_names = fe.transform(dft)
         feat_df_full = pd.DataFrame(X_full, index=dft.index, columns=feat_names)
-        X_sampled = feat_df_full.loc[dft_s.index].to_numpy(dtype=np.float32, copy=False)
+
+        # For TimeBarSampler, use nearest-index matching since TimeBar timestamps
+        # won't exist exactly in minute data
+        if isinstance(sampler, TimeBarSampler):
+            X_sampled = feat_df_full.reindex(dft_s.index, method='nearest').to_numpy(dtype=np.float32, copy=False)
+        else:
+            X_sampled = feat_df_full.loc[dft_s.index].to_numpy(dtype=np.float32, copy=False)
 
         if feature_names_ref is None:
             feature_names_ref = list(feat_names)
@@ -619,20 +626,26 @@ def prepare_experiment(
         df1 = ensure_utc_sorted_index(df1)
 
         # Compute features on minute data, then sample at sampler timestamps
-        # This ensures robust feature selection even for TimeBarSampler
         X_full, feat_names = fe.transform(df_full_raw)
         if feature_selector is not None:
             X_full, feat_names = feature_selector.transform(X_full, feat_names)
         feat_df_full = pd.DataFrame(X_full, index=df_full_raw.index, columns=feat_names)
-        try:
-            feat_df_sampled = feat_df_full.loc[df1.index]
-        except KeyError as exc:
-            missing = sorted(set(df1.index).difference(set(feat_df_full.index)))
-            missing_preview = [str(x) for x in missing[:5]]
-            raise RuntimeError(
-                f"Sampled timestamps for {t} were not found in the minute-resolution feature dataframe. "
-                f"Examples: {missing_preview}"
-            ) from exc
+
+        # For TimeBarSampler, use nearest-index matching since TimeBar timestamps
+        # won't exist exactly in minute data. For other samplers, use exact matching.
+        from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
+        if isinstance(sampler, TimeBarSampler):
+            feat_df_sampled = feat_df_full.reindex(df1.index, method='nearest')
+        else:
+            try:
+                feat_df_sampled = feat_df_full.loc[df1.index]
+            except KeyError as exc:
+                missing = sorted(set(df1.index).difference(set(feat_df_full.index)))
+                missing_preview = [str(x) for x in missing[:5]]
+                raise RuntimeError(
+                    f"Sampled timestamps for {t} were not found in the minute-resolution feature dataframe. "
+                    f"Examples: {missing_preview}"
+                ) from exc
 
         X = feat_df_sampled.to_numpy(dtype=np.float32, copy=False)
         y, y_meta = labeler.transform(df1)
