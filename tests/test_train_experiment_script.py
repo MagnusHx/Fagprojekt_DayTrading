@@ -63,7 +63,7 @@ def test_auto_wandb_name_builds_baseline_cv_name() -> None:
         wandb_name=None,
         baseline=True,
         model="conv1d",
-        cv_manifest="src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_cv_manifest.json",
+        cv_manifest="src/kvant/ml_framework/prepared/sb_L_96_wp24_h5_fixedCUSUM0.02_cv_manifest.json",
         exp_dir=None,
         epochs=3,
         transaction_cost=0.0,
@@ -72,7 +72,7 @@ def test_auto_wandb_name_builds_baseline_cv_name() -> None:
 
     out = _auto_wandb_name(args, run_cv=True)
 
-    assert out == "baseline-sb_L_12_w180_h1.5_TBPD30_cv_manifest-ep3-tc0"
+    assert out == "baseline-sb_L_96_wp24_h5_fixedCUSUM0.02_cv_manifest-ep3-tc0"
 
 
 def test_auto_wandb_name_builds_single_fold_name() -> None:
@@ -81,7 +81,7 @@ def test_auto_wandb_name_builds_single_fold_name() -> None:
         baseline=False,
         model="resnet_lstm",
         cv_manifest=None,
-        exp_dir="src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_fold00",
+        exp_dir="src/kvant/ml_framework/prepared/sb_L_96_wp24_h5_fixedCUSUM0.02_fold00",
         epochs=10,
         transaction_cost=0.001,
         pipeline_stage="primary_side",
@@ -89,7 +89,7 @@ def test_auto_wandb_name_builds_single_fold_name() -> None:
 
     out = _auto_wandb_name(args, run_cv=False)
 
-    assert out == "resnet_lstm-metaprimary_side-sb_L_12_w180_h1.5_TBPD30_fold00-ep10-tc0p001"
+    assert out == "resnet_lstm-metaprimary_side-sb_L_96_wp24_h5_fixedCUSUM0.02_fold00-ep10-tc0p001"
 
 
 def test_auto_wandb_name_keeps_explicit_name() -> None:

@@ -865,7 +865,7 @@ def prepare_single_dataset(
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(description="Prepare walk-forward kvant experiment artifacts.")
-    parser.add_argument("--sampler", choices=("tuned_cusum", "fixed_cusum"), default="tuned_cusum")
+    parser.add_argument("--sampler", choices=("tuned_cusum", "fixed_cusum"), default="fixed_cusum")
     parser.add_argument("--target-bars-per-day", type=float, default=30.0)
     parser.add_argument("--cusum-h", type=float, default=0.01)
     parser.add_argument("--lookback", type=int, default=12)
@@ -891,7 +891,14 @@ def main():
         downloaded_splits = downloaded_splits[: args.max_folds]
 
     TBPD = float(args.target_bars_per_day)
-    L, width, height_pct = int(args.lookback), int(args.barrier_width), float(args.barrier_height_pct)
+    L = int(args.lookback)
+    height_pct = float(args.barrier_height_pct)
+    width_minutes = None if args.barrier_width is None else int(args.barrier_width)
+    width_periods = None if args.barrier_width_periods is None else int(args.barrier_width_periods)
+    if width_minutes is not None and width_periods is not None and width_minutes > 0 and width_periods > 0:
+        raise RuntimeError("Choose either --barrier-width or --barrier-width-periods, not both.")
+    if (width_minutes is None or width_minutes <= 0) and (width_periods is None or width_periods <= 0):
+        raise RuntimeError("Provide a positive --barrier-width or --barrier-width-periods.")
     # Keep raw triple-barrier event labels by default; the training pipeline now
     # derives primary-side targets downstream and expects 3-class prepared artifacts.
     drop_time_exit_label = False
@@ -900,7 +907,8 @@ def main():
         sampler_tag = f"fixedCUSUM{float(args.cusum_h):g}"
     else:
         sampler_tag = f"TBPD{TBPD:g}"
-    label = f"sb_L_{L}_w{width}_h{height_pct:g}_{sampler_tag}{label_suffix}"
+    width_token = f"wp{int(width_periods)}" if width_periods is not None and width_periods > 0 else f"w{int(width_minutes)}"
+    label = f"sb_L_{L}_{width_token}_h{height_pct:g}_{sampler_tag}{label_suffix}"
     print(f"Writing to {label=}")
 
     from kvant.ml_prepare_data import prepared_data_root
@@ -933,16 +941,24 @@ def main():
             fillna_value=0.0,
         )
         fe = StandardizedFeatures(base=base_fe)
-        feature_selector = PrimarySideFScoreSelector(top_k=16)
+        feature_selector = (
+            None
+            if int(args.feature_selection_top_k) <= 0
+            else PrimarySideFScoreSelector(top_k=int(args.feature_selection_top_k))
+        )
         labeler = TripleBarrierLabeler(
-            name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=drop_time_exit_label
+            name=label,
+            height=height_pct / 100,
+            width_minutes=width_minutes,
+            width_periods=width_periods,
+            drop_time_exit_label=drop_time_exit_label,
         )
 
         cfg = ExperimentConfig(
             experiment_name="exp_minimal_sep_components",
             sampler=asdict(sampler),
             feature_engineer=asdict(fe),
-            feature_selector=asdict(feature_selector),
+            feature_selector=None if feature_selector is None else asdict(feature_selector),
             labeler=asdict(labeler),
             lookback_L=L,
             label_semantics=label_semantics_payload(drop_time_exit_label=False),

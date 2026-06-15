@@ -2,14 +2,14 @@
   "description": "Fill this after the Conv1D grid. Keep only configurations worth testing with ResNet-LSTM.",
   "configs": [
     {
-      "cusum_h": 0.005,
-      "barrier_height": 0.005,
-      "barrier_width": 60
+      "cusum_h": 0.02,
+      "barrier_height": 0.05,
+      "barrier_width_periods": 24
     },
     {
-      "cusum_h": 0.01,
-      "barrier_height": 0.01,
-      "barrier_width": 120
+      "cusum_h": 0.03,
+      "barrier_height": 0.06,
+      "barrier_width_periods": 24
     }
   ]
 }

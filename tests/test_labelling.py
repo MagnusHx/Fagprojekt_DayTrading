@@ -43,3 +43,22 @@ def test_triple_barrier_rejects_signal_without_next_entry_bar() -> None:
     )
 
     assert tripple_bar_label(df, time_start=idx[0], width=5, height=0.05) is None
+
+
+def test_triple_barrier_supports_vertical_barrier_in_periods() -> None:
+    idx = pd.date_range("2024-01-02 15:00:00", periods=5, freq="min", tz="UTC")
+    df = pd.DataFrame(
+        {
+            "open": [1.0, 100.0, 100.0, 100.0, 100.0],
+            "high": [1.0, 101.0, 101.0, 101.0, 101.0],
+            "low": [1.0, 99.0, 99.0, 99.0, 99.0],
+            "close": [1.0, 100.0, 100.0, 100.0, 100.0],
+        },
+        index=idx,
+    )
+
+    label = tripple_bar_label(df, time_start=idx[0], height=0.05, width_periods=3)
+
+    assert label is not None
+    assert label.entry_time == idx[1]
+    assert label.bar_close_time == idx[3]

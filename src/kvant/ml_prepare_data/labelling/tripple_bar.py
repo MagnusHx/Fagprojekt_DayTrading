@@ -18,8 +18,9 @@ class Labeler(Protocol):
 @dataclass(frozen=True)
 class TripleBarrierLabeler:
     name: str
-    width_minutes: int
     height: float
+    width_minutes: int | None = None
+    width_periods: int | None = None
     drop_time_exit_label: bool = False  # legacy field; event-outcome artifacts always persist raw labels
 
     def fit(self, df: pd.DataFrame) -> "TripleBarrierLabeler":
@@ -31,12 +32,18 @@ class TripleBarrierLabeler:
         metadata: list[Optional[dict]] = [None] * len(df)
 
         for i, t in enumerate(tqdm.tqdm(df.index, desc=f"Labeling {self.name}")):
-            res = tripple_bar_label(df, time_start=t, width=self.width_minutes, height=self.height)
+            res = tripple_bar_label(
+                df,
+                time_start=t,
+                height=self.height,
+                width_minutes=self.width_minutes,
+                width_periods=self.width_periods,
+            )
             if res is None:
                 continue
 
             # store metadata (even if we later drop a label, you can decide policy)
-            metadata[i] = res.__dict__ #_res_to_dict(res)
+            metadata[i] = res.__dict__
 
 
             lab = int(res.label)

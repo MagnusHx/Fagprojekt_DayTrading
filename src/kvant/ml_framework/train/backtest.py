@@ -74,8 +74,9 @@ class BacktestTradeSimulator:
     """Simulate barrier-based trades on sampled raw OHLCV bars."""
 
     market_data_store: MarketDataStore
-    width_minutes: int
     barrier_height: float
+    width_minutes: int = 0
+    width_periods: int = 0
     transaction_cost: float = 0.0
 
     def _candidate_trade(
@@ -120,9 +121,12 @@ class BacktestTradeSimulator:
         if not np.isfinite(entry_price) or entry_price <= 0.0:
             return None
 
-        end_target = entry_time + pd.Timedelta(minutes=int(self.width_minutes))
-        timestamp_index = pd.DatetimeIndex(pd.to_datetime(timestamps, utc=True))
-        end_pos = int(timestamp_index.searchsorted(end_target, side="right") - 1)
+        if int(self.width_periods) > 0:
+            end_pos = min(int(entry_pos + int(self.width_periods) - 1), len(timestamps) - 1)
+        else:
+            end_target = entry_time + pd.Timedelta(minutes=int(self.width_minutes))
+            timestamp_index = pd.DatetimeIndex(pd.to_datetime(timestamps, utc=True))
+            end_pos = int(timestamp_index.searchsorted(end_target, side="right") - 1)
         if end_pos < entry_pos:
             return None
 

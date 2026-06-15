@@ -54,6 +54,7 @@ class EvalConfig:
     risk_free_rate: float = 0.0314
     days_per_year: float = 365.0
     backtest_width_minutes: int = 0
+    backtest_width_periods: int = 0
     backtest_barrier_height: float = 0.0
     labels: tuple[int, ...] = (0, 1)
     meta_model: str = "logreg"
@@ -99,14 +100,18 @@ class ExperimentEvaluator:
         if int(self.cfg.portfolio_max_positions) <= 0:
             raise RuntimeError("portfolio_max_positions must be positive.")
         if self.cfg.compute_paper_trading_metrics:
-            if int(self.cfg.backtest_width_minutes) <= 0:
-                raise RuntimeError("Paper trading metrics require a positive backtest_width_minutes setting.")
+            if int(self.cfg.backtest_width_minutes) <= 0 and int(self.cfg.backtest_width_periods) <= 0:
+                raise RuntimeError(
+                    "Paper trading metrics require a positive backtest_width_minutes or "
+                    "backtest_width_periods setting."
+                )
             if float(self.cfg.backtest_barrier_height) <= 0.0:
                 raise RuntimeError("Paper trading metrics require a positive backtest_barrier_height setting.")
         self.paper_trade_simulator = BacktestTradeSimulator(
             market_data_store=self.store,
-            width_minutes=int(self.cfg.backtest_width_minutes),
             barrier_height=float(self.cfg.backtest_barrier_height),
+            width_minutes=int(self.cfg.backtest_width_minutes),
+            width_periods=int(self.cfg.backtest_width_periods),
             transaction_cost=float(self.cfg.transaction_cost),
         )
 
