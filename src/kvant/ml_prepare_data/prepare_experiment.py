@@ -1,5 +1,6 @@
 # prepare_experiment.py
 import argparse
+import shutil
 from kvant.ml_prepare_data.features.feature_engineering import (
     IntradayTA10Features,
     StandardizedFeatures,
@@ -870,9 +871,24 @@ def main():
     parser.add_argument("--lookback", type=int, default=12)
     parser.add_argument("--barrier-width", type=int, default=180)
     parser.add_argument("--barrier-height-pct", type=float, default=1.5)
+    parser.add_argument(
+        "--max-folds",
+        type=int,
+        default=None,
+        help="Limit the number of walk-forward folds to prepare. Useful for fast screening sweeps.",
+    )
+    parser.add_argument(
+        "--overwrite-existing",
+        action="store_true",
+        help="Remove existing prepared fold directories and manifest for this configuration before writing.",
+    )
     args = parser.parse_args()
 
     downloaded_splits = get_huggingface_top_20_normal_splits()
+    if args.max_folds is not None:
+        if args.max_folds <= 0:
+            raise SystemExit("--max-folds must be positive when provided.")
+        downloaded_splits = downloaded_splits[: args.max_folds]
 
     TBPD = float(args.target_bars_per_day)
     L, width, height_pct = int(args.lookback), int(args.barrier_width), float(args.barrier_height_pct)
@@ -888,6 +904,17 @@ def main():
     print(f"Writing to {label=}")
 
     from kvant.ml_prepare_data import prepared_data_root
+
+    if args.overwrite_existing:
+        for fold_idx in range(len(downloaded_splits)):
+            fold_dir = prepared_data_root / f"{label}_fold{fold_idx:02d}"
+            if fold_dir.exists():
+                shutil.rmtree(fold_dir)
+                print(f"Removed existing prepared fold directory: {fold_dir}")
+        manifest_path = prepared_data_root / f"{label}_cv_manifest.json"
+        if manifest_path.exists():
+            manifest_path.unlink()
+            print(f"Removed existing CV manifest: {manifest_path}")
 
     cv_rows = []
     last_prepared = None
