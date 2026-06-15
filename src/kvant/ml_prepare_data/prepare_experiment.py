@@ -935,11 +935,17 @@ def main():
         else:
             sampler = TunedCUSUMBarSampler(target_bars_per_day=TBPD, aggregate_ohlcv=True)
 
+        # For TimeBarSampler, indicators need to account for 15-min bar structure
+        # For other samplers, use 1-min (default)
+        from kvant.ml_prepare_data.samplers.time_bar import TimeBarSampler
+        data_bar_minutes = time_bar_minutes if isinstance(sampler, TimeBarSampler) else 1
+
         base_fe = IntradayTA10Features(
             volume_output="log1p",
             include_time_features=True,
             typical_bar_minutes=None,  # periods in bars (paper style)
             fillna_value=0.0,
+            data_bar_minutes=data_bar_minutes,
         )
         fe = StandardizedFeatures(base=base_fe)
         feature_selector = PrimarySideFScoreSelector(top_k=16)
