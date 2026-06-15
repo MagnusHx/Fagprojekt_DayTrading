@@ -18,17 +18,20 @@ class NextBarDirectionLabeler:
     Simplest baseline labeler: next-bar direction.
 
     For each bar at time t with close price p_t:
-    - Label = +1 if p_{t+1} > p_t (next bar's close is higher)
-    - Label = -1 if p_{t+1} < p_t (next bar's close is lower)
-    - Label = 0 if p_{t+1} == p_t (no change, rare)
+    - Label = 1 if p_{t+1} > p_t (next bar's close is higher)
+    - Label = 0 if p_{t+1} < p_t (next bar's close is lower)
+    - Label = 1 if p_{t+1} == p_t (no change → treated as up)
 
-    The last bar in the series gets label = -1 (no next bar to compare).
+    The last bar in the series gets label = 0 (down, no next bar to compare).
 
     Metadata tracks:
+    - signal_time: bar timestamp
+    - bar_close_time: bar timestamp
     - next_close: the close price of the next bar
-    - return: log return from t to t+1
+    - log_return: log return from t to t+1
     """
     name: str = "next_bar_direction"
+    width_minutes: int = 15  # Backtest window width (default 15 for time_bar sampler)
 
     def fit(self, df: pd.DataFrame) -> "NextBarDirectionLabeler":
         return self

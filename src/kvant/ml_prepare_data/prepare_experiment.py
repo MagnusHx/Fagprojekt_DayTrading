@@ -968,7 +968,9 @@ def main():
 
         # Instantiate labeler
         if args.labeler == "next_bar":
-            labeler = NextBarDirectionLabeler(name=label)
+            # For time_bar sampler, use time_bar_minutes as width_minutes
+            nbr_width = time_bar_minutes if args.sampler == "time_bar" else 15
+            labeler = NextBarDirectionLabeler(name=label, width_minutes=nbr_width)
         else:
             labeler = TripleBarrierLabeler(
                 name=label, width_minutes=width, height=height_pct / 100, drop_time_exit_label=drop_time_exit_label
