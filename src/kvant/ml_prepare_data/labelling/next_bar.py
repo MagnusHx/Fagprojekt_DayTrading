@@ -44,6 +44,7 @@ class NextBarDirectionLabeler:
             return labels, metadata
 
         closes = df["close"].values
+        timestamps = df.index.to_numpy()
 
         for i in range(len(df) - 1):
             current_close = closes[i]
@@ -63,12 +64,21 @@ class NextBarDirectionLabeler:
             # Log return from current to next bar
             log_return = np.log(next_close / current_close) if current_close > 0 else 0.0
 
+            # Required metadata for split-safety validation (signal_time and bar_close_time)
             metadata[i] = {
+                "signal_time": timestamps[i],
+                "bar_close_time": timestamps[i],
                 "next_close": float(next_close),
                 "log_return": float(log_return),
                 "label": int(label),
             }
 
         # Last bar: no next bar, label stays 0 (down)
+        if len(df) > 0:
+            metadata[len(df) - 1] = {
+                "signal_time": timestamps[len(df) - 1],
+                "bar_close_time": timestamps[len(df) - 1],
+                "label": 0,
+            }
 
         return labels, metadata
