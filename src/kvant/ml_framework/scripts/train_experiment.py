@@ -60,6 +60,20 @@ RESULT_METRICS = {
     "val_pred_side_class_1_pct": "val/distribution/pred_side/class_1_pct",
     "val_pred_side_class_0_count": "val/distribution/pred_side/class_0_count",
     "val_pred_side_class_1_count": "val/distribution/pred_side/class_1_count",
+    "val_trade_signal_class_0_pct": "val/distribution/trade_signal/class_0_pct",
+    "val_trade_signal_class_1_pct": "val/distribution/trade_signal/class_1_pct",
+    "val_trade_signal_class_2_pct": "val/distribution/trade_signal/class_2_pct",
+    "val_trade_signal_class_0_count": "val/distribution/trade_signal/class_0_count",
+    "val_trade_signal_class_1_count": "val/distribution/trade_signal/class_1_count",
+    "val_trade_signal_class_2_count": "val/distribution/trade_signal/class_2_count",
+    "val_confusion_true0_pred0_count": "val/confusion/true0_pred0_count",
+    "val_confusion_true0_pred1_count": "val/confusion/true0_pred1_count",
+    "val_confusion_true1_pred0_count": "val/confusion/true1_pred0_count",
+    "val_confusion_true1_pred1_count": "val/confusion/true1_pred1_count",
+    "val_confusion_true0_pred0_row_pct": "val/confusion/true0_pred0_row_pct",
+    "val_confusion_true0_pred1_row_pct": "val/confusion/true0_pred1_row_pct",
+    "val_confusion_true1_pred0_row_pct": "val/confusion/true1_pred0_row_pct",
+    "val_confusion_true1_pred1_row_pct": "val/confusion/true1_pred1_row_pct",
     "test_accuracy": "test/classification/accuracy",
     "test_f1_macro": "test/classification/f1_macro",
     "test_meta_f1": "test/meta/f1",
@@ -81,6 +95,20 @@ RESULT_METRICS = {
     "test_pred_side_class_1_pct": "test/distribution/pred_side/class_1_pct",
     "test_pred_side_class_0_count": "test/distribution/pred_side/class_0_count",
     "test_pred_side_class_1_count": "test/distribution/pred_side/class_1_count",
+    "test_trade_signal_class_0_pct": "test/distribution/trade_signal/class_0_pct",
+    "test_trade_signal_class_1_pct": "test/distribution/trade_signal/class_1_pct",
+    "test_trade_signal_class_2_pct": "test/distribution/trade_signal/class_2_pct",
+    "test_trade_signal_class_0_count": "test/distribution/trade_signal/class_0_count",
+    "test_trade_signal_class_1_count": "test/distribution/trade_signal/class_1_count",
+    "test_trade_signal_class_2_count": "test/distribution/trade_signal/class_2_count",
+    "test_confusion_true0_pred0_count": "test/confusion/true0_pred0_count",
+    "test_confusion_true0_pred1_count": "test/confusion/true0_pred1_count",
+    "test_confusion_true1_pred0_count": "test/confusion/true1_pred0_count",
+    "test_confusion_true1_pred1_count": "test/confusion/true1_pred1_count",
+    "test_confusion_true0_pred0_row_pct": "test/confusion/true0_pred0_row_pct",
+    "test_confusion_true0_pred1_row_pct": "test/confusion/true0_pred1_row_pct",
+    "test_confusion_true1_pred0_row_pct": "test/confusion/true1_pred0_row_pct",
+    "test_confusion_true1_pred1_row_pct": "test/confusion/true1_pred1_row_pct",
 }
 
 
@@ -625,7 +653,9 @@ def _write_default_cv_result_csvs(
     manifest_path: Path,
     rows: list[dict[str, float | int | None]],
 ) -> None:
-    primary_path = Path(args.results_out) if args.results_out is not None else _default_results_path(args, manifest_path)
+    primary_path = (
+        Path(args.results_out) if args.results_out is not None else _default_results_path(args, manifest_path)
+    )
     _write_cv_results_csv(primary_path, rows)
     if args.results_out is not None:
         return

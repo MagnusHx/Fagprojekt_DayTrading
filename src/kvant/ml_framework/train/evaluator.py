@@ -268,6 +268,14 @@ class ExperimentEvaluator:
             ).astype(np.int64, copy=False)
         else:
             cm = np.zeros((len(self.cfg.labels), len(self.cfg.labels)), dtype=np.int64)
+        for true_idx, true_label in enumerate(self.cfg.labels):
+            row_total = int(np.sum(cm[true_idx, :]))
+            for pred_idx, pred_label in enumerate(self.cfg.labels):
+                count = int(cm[true_idx, pred_idx])
+                metrics[f"{split}/confusion/true{int(true_label)}_pred{int(pred_label)}_count"] = count
+                metrics[f"{split}/confusion/true{int(true_label)}_pred{int(pred_label)}_row_pct"] = (
+                    float(count / row_total) if row_total else 0.0
+                )
 
         per_tid_profit: Dict[int, Dict[str, Any]] = {}
         profit_curve: Optional[Dict[str, Any]] = None

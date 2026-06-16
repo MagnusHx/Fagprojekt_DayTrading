@@ -121,6 +121,15 @@ def _score_split(y_true: np.ndarray, y_pred: np.ndarray, prefix: str) -> dict[st
         out[f"{prefix}_true_side_class_{label}_pct"] = float(true_count / n) if n else 0.0
         out[f"{prefix}_pred_side_class_{label}_count"] = pred_count
         out[f"{prefix}_pred_side_class_{label}_pct"] = float(pred_count / n) if n else 0.0
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1]).astype(np.int64, copy=False)
+    for true_label in (0, 1):
+        row_total = int(np.sum(cm[true_label, :]))
+        for pred_label in (0, 1):
+            count = int(cm[true_label, pred_label])
+            out[f"{prefix}_confusion_true{true_label}_pred{pred_label}_count"] = count
+            out[f"{prefix}_confusion_true{true_label}_pred{pred_label}_row_pct"] = (
+                float(count / row_total) if row_total else 0.0
+            )
     return out
 
 
@@ -151,28 +160,28 @@ def run_sklearn_baseline(manifest: dict, *, model: str, seed: int) -> list[dict[
             **_score_split(test_labels, test_preds, "test"),
         }
 
-        fig_test = _plot_confusion_matrix(
-            test_labels, test_preds, "test", f"{model} baseline - Fold {fold_idx} - Test"
-        )
+        fig_test = _plot_confusion_matrix(test_labels, test_preds, "test", f"{model} baseline - Fold {fold_idx} - Test")
         wandb.log({f"confusion_matrix/test_fold_{fold_idx}": wandb.Image(fig_test)})
         plt.close(fig_test)
 
-        wandb.log({
-            f"fold{fold_idx:02d}/test/accuracy": fold_result["test_accuracy"],
-            f"fold{fold_idx:02d}/test/f1_macro": fold_result["test_f1_macro"],
-            f"fold{fold_idx:02d}/test/distribution/pred_side/class_0_pct": fold_result[
-                "test_pred_side_class_0_pct"
-            ],
-            f"fold{fold_idx:02d}/test/distribution/pred_side/class_1_pct": fold_result[
-                "test_pred_side_class_1_pct"
-            ],
-            f"fold{fold_idx:02d}/test/distribution/true_side/class_0_pct": fold_result[
-                "test_true_side_class_0_pct"
-            ],
-            f"fold{fold_idx:02d}/test/distribution/true_side/class_1_pct": fold_result[
-                "test_true_side_class_1_pct"
-            ],
-        })
+        wandb.log(
+            {
+                f"fold{fold_idx:02d}/test/accuracy": fold_result["test_accuracy"],
+                f"fold{fold_idx:02d}/test/f1_macro": fold_result["test_f1_macro"],
+                f"fold{fold_idx:02d}/test/distribution/pred_side/class_0_pct": fold_result[
+                    "test_pred_side_class_0_pct"
+                ],
+                f"fold{fold_idx:02d}/test/distribution/pred_side/class_1_pct": fold_result[
+                    "test_pred_side_class_1_pct"
+                ],
+                f"fold{fold_idx:02d}/test/distribution/true_side/class_0_pct": fold_result[
+                    "test_true_side_class_0_pct"
+                ],
+                f"fold{fold_idx:02d}/test/distribution/true_side/class_1_pct": fold_result[
+                    "test_true_side_class_1_pct"
+                ],
+            }
+        )
         results.append(fold_result)
 
     return results
@@ -180,9 +189,7 @@ def run_sklearn_baseline(manifest: dict, *, model: str, seed: int) -> list[dict[
 
 def main():
     """Run the requested scikit-learn baseline and save fold-level metrics."""
-    parser = argparse.ArgumentParser(
-        description="Run simple scikit-learn baseline models on prepared CV artifacts."
-    )
+    parser = argparse.ArgumentParser(description="Run simple scikit-learn baseline models on prepared CV artifacts.")
     parser.add_argument(
         "--model",
         choices=["majority", "random", "logreg", "random_forest", "hist_gb"],
@@ -254,6 +261,10 @@ def main():
         "train_true_side_class_1_pct",
         "train_pred_side_class_0_pct",
         "train_pred_side_class_1_pct",
+        "train_confusion_true0_pred0_count",
+        "train_confusion_true0_pred1_count",
+        "train_confusion_true1_pred0_count",
+        "train_confusion_true1_pred1_count",
         "val_accuracy",
         "val_f1_macro",
         "val_precision_macro",
@@ -262,6 +273,10 @@ def main():
         "val_true_side_class_1_pct",
         "val_pred_side_class_0_pct",
         "val_pred_side_class_1_pct",
+        "val_confusion_true0_pred0_count",
+        "val_confusion_true0_pred1_count",
+        "val_confusion_true1_pred0_count",
+        "val_confusion_true1_pred1_count",
         "test_accuracy",
         "test_f1_macro",
         "test_precision_macro",
@@ -270,6 +285,10 @@ def main():
         "test_true_side_class_1_pct",
         "test_pred_side_class_0_pct",
         "test_pred_side_class_1_pct",
+        "test_confusion_true0_pred0_count",
+        "test_confusion_true0_pred1_count",
+        "test_confusion_true1_pred0_count",
+        "test_confusion_true1_pred1_count",
     ]
 
     for metric in metrics_to_agg:
@@ -279,12 +298,14 @@ def main():
         ci_lower, ci_upper = calculate_ci(values, confidence=0.95)
 
         # Log to W&B
-        wandb.log({
-            f"{metric}/mean": mean_val,
-            f"{metric}/std": std_val,
-            f"{metric}/ci_lower": ci_lower,
-            f"{metric}/ci_upper": ci_upper,
-        })
+        wandb.log(
+            {
+                f"{metric}/mean": mean_val,
+                f"{metric}/std": std_val,
+                f"{metric}/ci_lower": ci_lower,
+                f"{metric}/ci_upper": ci_upper,
+            }
+        )
 
         print(f"{metric}: {mean_val:.4f} ± {std_val:.4f}  [95% CI: {ci_lower:.4f}, {ci_upper:.4f}]")
 

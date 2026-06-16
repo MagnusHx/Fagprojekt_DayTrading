@@ -133,6 +133,91 @@ def write_metric_plots(summary: pd.DataFrame, metrics: list[str], output_dir: Pa
         _plot_metric_bar(summary, metric, output_dir)
 
 
+def _safe_stem(name: str) -> str:
+    """Return a filesystem-safe stem for a run name."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_")
+
+
+def _confusion_matrix_from_result(df: pd.DataFrame, split: str) -> np.ndarray | None:
+    """Build an aggregate 2x2 confusion matrix from fold-level count columns."""
+    columns = [
+        f"{split}_confusion_true0_pred0_count",
+        f"{split}_confusion_true0_pred1_count",
+        f"{split}_confusion_true1_pred0_count",
+        f"{split}_confusion_true1_pred1_count",
+    ]
+    if any(column not in df.columns for column in columns):
+        return None
+    values = df[columns].fillna(0).sum(axis=0).to_numpy(dtype=float)
+    return values.reshape(2, 2)
+
+
+def write_confusion_matrices(
+    loaded: dict[str, pd.DataFrame],
+    *,
+    output_dir: Path,
+    table_dir: Path,
+    split: str = "test",
+) -> None:
+    """Write aggregate confusion matrix CSV and heatmaps for runs with count columns."""
+    rows = []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for run_name, df in loaded.items():
+        cm = _confusion_matrix_from_result(df, split)
+        if cm is None:
+            continue
+        total = float(np.sum(cm))
+        normalized = np.divide(
+            cm, cm.sum(axis=1, keepdims=True), out=np.zeros_like(cm), where=cm.sum(axis=1, keepdims=True) > 0
+        )
+
+        rows.append(
+            {
+                "run": run_name,
+                "split": split,
+                "true0_pred0_count": int(cm[0, 0]),
+                "true0_pred1_count": int(cm[0, 1]),
+                "true1_pred0_count": int(cm[1, 0]),
+                "true1_pred1_count": int(cm[1, 1]),
+                "true0_pred0_row_pct": float(normalized[0, 0]),
+                "true0_pred1_row_pct": float(normalized[0, 1]),
+                "true1_pred0_row_pct": float(normalized[1, 0]),
+                "true1_pred1_row_pct": float(normalized[1, 1]),
+                "n": int(total),
+            }
+        )
+
+        fig, ax = plt.subplots(figsize=(4.8, 4.2), dpi=150)
+        image = ax.imshow(normalized, vmin=0.0, vmax=1.0, cmap="Blues")
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["Pred 0", "Pred 1"])
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(["True 0", "True 1"])
+        ax.set_xlabel("Predicted class")
+        ax.set_ylabel("True class")
+        ax.set_title(f"{run_name} ({split})")
+        for y in range(2):
+            for x in range(2):
+                ax.text(
+                    x,
+                    y,
+                    f"{normalized[y, x]:.2f}\n({int(cm[y, x])})",
+                    ha="center",
+                    va="center",
+                    color="white" if normalized[y, x] > 0.55 else "black",
+                )
+        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+        fig.tight_layout()
+        stem = f"confusion_matrix_{split}_{_safe_stem(run_name)}"
+        fig.savefig(output_dir / f"{stem}.png")
+        fig.savefig(output_dir / f"{stem}.pdf")
+        plt.close(fig)
+
+    if rows:
+        table_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(table_dir / f"confusion_matrices_{split}.csv", index=False)
+
+
 def _extract_grid_params(run_name: str) -> tuple[float, float] | None:
     """Extract CUSUM and triple-barrier percent values from an E2 grid run name."""
     match = re.search(r"tb(?P<tb>\d+(?:p\d+)?)-cusum(?P<cusum>\d+(?:p\d+)?)", run_name)
@@ -205,15 +290,17 @@ def write_pairwise_tests(
             if len(values_a) != len(values_b) or len(values_a) == 0:
                 continue
             test = paired_ttest(values_a, values_b)
-            rows.append({
-                "comparison": f"{name_a} vs {name_b}",
-                "metric": metric,
-                "mean_diff": test["mean_diff"],
-                "ci_lower": test["ci_lower"],
-                "ci_upper": test["ci_upper"],
-                "p_value": test["p_value"],
-                "significant_5pct": bool(test["significant"]),
-            })
+            rows.append(
+                {
+                    "comparison": f"{name_a} vs {name_b}",
+                    "metric": metric,
+                    "mean_diff": test["mean_diff"],
+                    "ci_lower": test["ci_lower"],
+                    "ci_upper": test["ci_upper"],
+                    "p_value": test["p_value"],
+                    "significant_5pct": bool(test["significant"]),
+                }
+            )
     df = pd.DataFrame(rows)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
@@ -252,6 +339,7 @@ def main() -> None:
     write_latex_table(summary, table_dir / "summary_metrics.tex")
     write_metric_plots(summary, metrics, figure_dir)
     write_grid_heatmap(summary, metric=str(args.grid_heatmap_metric), output_dir=figure_dir)
+    write_confusion_matrices(loaded, output_dir=figure_dir, table_dir=table_dir, split="test")
 
     if args.comparison:
         tests = write_pairwise_tests(

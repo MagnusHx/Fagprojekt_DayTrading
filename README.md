@@ -275,8 +275,13 @@ uv run python scripts/compare_experiments.py \
     test_portfolio_total_return_pct \
     test_portfolio_sharpe_ratio_annualized \
     test_portfolio_max_drawdown_pct \
+    test_true_side_class_0_pct \
+    test_true_side_class_1_pct \
     test_pred_side_class_0_pct \
     test_pred_side_class_1_pct \
+    test_trade_signal_class_0_pct \
+    test_trade_signal_class_1_pct \
+    test_trade_signal_class_2_pct \
   --wandb-project day-trading-experiments \
   --wandb-name E2-timebar-vs-best-cusumtb
 ```
@@ -503,8 +508,13 @@ uv run python scripts/generate_experiment_report.py \
   --metric test_portfolio_sharpe_ratio_annualized \
   --metric test_portfolio_max_drawdown_pct \
   --metric test_portfolio_n_executed_trades \
+  --metric test_true_side_class_0_pct \
+  --metric test_true_side_class_1_pct \
   --metric test_pred_side_class_0_pct \
   --metric test_pred_side_class_1_pct \
+  --metric test_trade_signal_class_0_pct \
+  --metric test_trade_signal_class_1_pct \
+  --metric test_trade_signal_class_2_pct \
   --comparison E1-timebar-conv1d-nometa="$BEST_GRID_RUN" \
   --comparison E2-timebar-density-matched-nextbar="$BEST_GRID_RUN" \
   --comparison "$BEST_GRID_RUN=$BEST_RESNET_RUN"
@@ -515,6 +525,7 @@ Expected outputs:
 ```text
 reports/generated/tables/summary_metrics.csv
 reports/generated/tables/summary_metrics.tex
+reports/generated/tables/confusion_matrices_test.csv
 reports/generated/tables/pairwise_tests.csv
 reports/generated/tables/pairwise_tests.tex
 reports/generated/figures/*.png
@@ -545,6 +556,18 @@ Training logs classification, decision, and portfolio metrics. It also logs clas
 
 Use these to catch prediction collapse, for example a model predicting only one class.
 
+Training also writes fold-level confusion matrix counts to the result CSV:
+
+```text
+{split}_confusion_true0_pred0_count
+{split}_confusion_true0_pred1_count
+{split}_confusion_true1_pred0_count
+{split}_confusion_true1_pred1_count
+```
+
+`scripts/generate_experiment_report.py` aggregates those counts across folds and writes report-ready confusion matrix
+figures when the columns are present.
+
 ## Training Defaults
 
 The training CLI uses cosine learning-rate scheduling by default:
@@ -572,8 +595,10 @@ Model dropout defaults to `0.3`. Early stopping is available but not enabled unl
 | Dataset/sample count table | `reports/generated/tables/dataset_summary.tex` |
 | Main metric table | `reports/generated/tables/summary_metrics.tex` |
 | Pairwise statistical tests | `reports/generated/tables/pairwise_tests.tex` |
+| Confusion matrix counts | `reports/generated/tables/confusion_matrices_test.csv` |
 | Sample count figure | `reports/generated/figures/sample_count_comparison.pdf` |
 | Grid heatmap | `reports/generated/figures/grid_heatmap_val_f1_macro.pdf` |
+| Confusion matrix figures | `reports/generated/figures/confusion_matrix_test_*.pdf` |
 | Metric comparison figures | `reports/generated/figures/*.pdf` |
 
 ## Interpretation Rules
