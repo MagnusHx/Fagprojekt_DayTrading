@@ -887,7 +887,7 @@ def main():
     parser.add_argument("--time-bar-minutes", type=int, default=15, help="Aggregate to k-minute bars (for --sampler time_bar)")
     parser.add_argument("--cusum-h", type=float, default=0.01)
     parser.add_argument("--lookback", type=int, default=12)
-    parser.add_argument("--barrier-width", type=int, default=180)
+    parser.add_argument("--barrier-width", type=int, default=240)
     parser.add_argument("--barrier-height-pct", type=float, default=1.5)
     parser.add_argument("--labeler", choices=("triple_barrier", "next_bar"), default="triple_barrier")
     parser.add_argument("--cv-manifest", type=str, default=None, help="Path to write CV manifest JSON")
