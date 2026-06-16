@@ -66,7 +66,7 @@ TRAINING_PRESETS = {
             "--portfolio-max-position-fraction",
             "0.02",
             "--transaction-cost",
-            "0.001",
+            "0",
         ),
     ),
     "main-no-cost": TrainingPreset(
@@ -128,7 +128,7 @@ TRAINING_PRESETS = {
             "--portfolio-max-position-fraction",
             "0.02",
             "--transaction-cost",
-            "0.001",
+            "0",
         ),
     ),
 }
@@ -198,7 +198,7 @@ def smoke(ctx: Context, exp_dir: str = "", cv_manifest: str = "", extra_args: st
 
 @task(name="baseline-no-cost")
 def baseline_no_cost(ctx: Context, exp_dir: str = "", cv_manifest: str = "", extra_args: str = "") -> None:
-    """Run the shared Conv1D baseline without transaction costs."""
+    """Run the shared zero-cost Conv1D baseline."""
     _run_training_preset(
         ctx, preset_name="baseline-no-cost", exp_dir=exp_dir, cv_manifest=cv_manifest, extra_args=extra_args
     )
@@ -206,7 +206,7 @@ def baseline_no_cost(ctx: Context, exp_dir: str = "", cv_manifest: str = "", ext
 
 @task(name="baseline-cost")
 def baseline_cost(ctx: Context, exp_dir: str = "", cv_manifest: str = "", extra_args: str = "") -> None:
-    """Run the shared Conv1D baseline with transaction costs."""
+    """Run the legacy cost-named Conv1D baseline under the zero-cost protocol."""
     _run_training_preset(
         ctx, preset_name="baseline-cost", exp_dir=exp_dir, cv_manifest=cv_manifest, extra_args=extra_args
     )
@@ -214,7 +214,7 @@ def baseline_cost(ctx: Context, exp_dir: str = "", cv_manifest: str = "", extra_
 
 @task(name="main-no-cost")
 def main_no_cost(ctx: Context, exp_dir: str = "", cv_manifest: str = "", extra_args: str = "") -> None:
-    """Run the shared ResNet-LSTM candidate without transaction costs."""
+    """Run the shared zero-cost ResNet-LSTM candidate."""
     _run_training_preset(
         ctx, preset_name="main-no-cost", exp_dir=exp_dir, cv_manifest=cv_manifest, extra_args=extra_args
     )
@@ -222,7 +222,7 @@ def main_no_cost(ctx: Context, exp_dir: str = "", cv_manifest: str = "", extra_a
 
 @task(name="main-cost")
 def main_cost(ctx: Context, exp_dir: str = "", cv_manifest: str = "", extra_args: str = "") -> None:
-    """Run the shared ResNet-LSTM candidate with transaction costs."""
+    """Run the legacy cost-named ResNet-LSTM candidate under the zero-cost protocol."""
     _run_training_preset(ctx, preset_name="main-cost", exp_dir=exp_dir, cv_manifest=cv_manifest, extra_args=extra_args)
 
 

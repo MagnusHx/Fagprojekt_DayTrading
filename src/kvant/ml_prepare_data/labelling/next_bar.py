@@ -33,7 +33,7 @@ class NextBarDirectionLabeler:
     """
     name: str = "next_bar_direction"
     width_minutes: int = 15  # Backtest window width (default 15 for time_bar sampler)
-    height: float = 0.025  # Backtest barrier height (2.5% default, same as triple-barrier)
+    height: float = 0.02  # Backtest barrier height (2.0% default, same as triple-barrier)
 
     def fit(self, df: pd.DataFrame) -> "NextBarDirectionLabeler":
         return self

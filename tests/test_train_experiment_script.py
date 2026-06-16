@@ -16,6 +16,7 @@ from kvant.ml_framework.scripts.train_experiment import (
     _default_results_path,
     _device_status_message,
     _fold_result_row,
+    _make_lr_scheduler,
     _manifest_results_path,
     _parse_meta_features,
     _validate_primary_side_train_labels,
@@ -31,6 +32,8 @@ def test_recommended_training_defaults(monkeypatch, tmp_path) -> None:
 
     assert args.epochs == 30
     assert args.lr == 1e-3
+    assert args.lr_scheduler == "cosine"
+    assert args.min_lr == 1e-5
     assert args.full_eval_every == 3
     assert args.kelly_fraction == 0.25
     assert args.portfolio_max_position_fraction == 0.02
@@ -42,7 +45,7 @@ def test_baseline_preset_forces_conv1d_and_zero_cost() -> None:
     args = argparse.Namespace(
         baseline=True,
         model="resnet_lstm",
-        transaction_cost=0.001,
+        transaction_cost=0.0,
         wandb_name=None,
     )
 
@@ -57,7 +60,7 @@ def test_baseline_preset_keeps_explicit_wandb_name() -> None:
     args = argparse.Namespace(
         baseline=True,
         model="resnet_lstm",
-        transaction_cost=0.001,
+        transaction_cost=0.0,
         wandb_name="my-baseline",
     )
 
@@ -93,13 +96,13 @@ def test_auto_wandb_name_builds_single_fold_name() -> None:
         cv_manifest=None,
         exp_dir="src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_fold00",
         epochs=10,
-        transaction_cost=0.001,
+        transaction_cost=0.0,
         pipeline_stage="primary_side",
     )
 
     out = _auto_wandb_name(args, run_cv=False)
 
-    assert out == "resnet_lstm-metaprimary_side-sb_L_12_w180_h1.5_TBPD30_fold00-ep10-tc0p001"
+    assert out == "resnet_lstm-metaprimary_side-sb_L_12_w180_h1.5_TBPD30_fold00-ep10-tc0"
 
 
 def test_auto_wandb_name_keeps_explicit_name() -> None:
@@ -121,6 +124,24 @@ def test_parse_meta_features_supports_repeated_and_csv_inputs() -> None:
     out = _parse_meta_features(["proba,embedding", "prepared_last:f0"])
 
     assert out == ("proba", "embedding", "prepared_last:f0")
+
+
+def test_make_lr_scheduler_builds_cosine_scheduler() -> None:
+    model = torch.nn.Linear(2, 1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    args = argparse.Namespace(lr_scheduler="cosine", epochs=10, min_lr=1e-5)
+
+    scheduler = _make_lr_scheduler(args, optimizer)
+
+    assert isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR)
+
+
+def test_make_lr_scheduler_can_be_disabled() -> None:
+    model = torch.nn.Linear(2, 1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    args = argparse.Namespace(lr_scheduler="none", epochs=10, min_lr=1e-5)
+
+    assert _make_lr_scheduler(args, optimizer) is None
 
 
 def _write_prepared_config(exp_dir, *, binary: bool) -> None:

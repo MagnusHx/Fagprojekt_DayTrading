@@ -182,8 +182,7 @@ Available models:
 - `conv1d`: default and baseline model
 - `resnet_lstm`: selectable stronger model
 
-The `--baseline` preset forces `model=conv1d` and `transaction_cost=0.0`. Otherwise the default transaction cost is
-`0.001`.
+The `--baseline` preset forces `model=conv1d` and `transaction_cost=0.0`. The default transaction cost is also `0.0`.
 
 ### 8. Meta-Label Decision Layer
 
@@ -317,7 +316,7 @@ Run a stricter economic experiment:
 WANDB_MODE=offline uv run python -m kvant.ml_framework.scripts.train_experiment \
   --model resnet_lstm \
   --epochs 10 \
-  --transaction-cost 0.001 \
+  --transaction-cost 0 \
   --portfolio-initial-cash 10000 \
   --portfolio-max-position-fraction 0.05 \
   --portfolio-max-total-exposure 1.0 \

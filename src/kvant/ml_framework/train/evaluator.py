@@ -51,7 +51,7 @@ class EvalConfig:
     portfolio_max_position_fraction: float = 0.02
     portfolio_max_total_exposure: float = 1.0
     portfolio_max_positions: int = 10
-    transaction_cost: float = 0.001
+    transaction_cost: float = 0.0
     risk_free_rate: float = 0.0314
     days_per_year: float = 365.0
     backtest_width_minutes: int = 0

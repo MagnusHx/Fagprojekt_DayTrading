@@ -70,6 +70,23 @@ def _parse_meta_features(values: list[str] | None) -> tuple[str, ...]:
     return normalize_meta_features(values)
 
 
+def _make_lr_scheduler(
+    args: argparse.Namespace,
+    optimizer: torch.optim.Optimizer,
+) -> torch.optim.lr_scheduler.LRScheduler | None:
+    """Create the configured learning-rate scheduler."""
+    scheduler_name = getattr(args, "lr_scheduler", "cosine")
+    if scheduler_name == "none":
+        return None
+    if scheduler_name == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, int(args.epochs)),
+            eta_min=float(args.min_lr),
+        )
+    raise ValueError(f"Unknown learning-rate scheduler {scheduler_name!r}.")
+
+
 def _droptexit_sibling(path: Path | None) -> Path | None:
     if path is None:
         return None
@@ -219,6 +236,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--seed", type=int, default=1337)
     p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--lr-scheduler", choices=("cosine", "none"), default="cosine")
+    p.add_argument("--min-lr", type=float, default=1e-5)
     p.add_argument("--weight-decay", type=float, default=5e-5)
     p.add_argument(
         "--baseline",
@@ -250,7 +269,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--portfolio-max-position-fraction", type=float, default=0.02)
     p.add_argument("--portfolio-max-total-exposure", type=float, default=1.0)
     p.add_argument("--portfolio-max-positions", type=int, default=10)
-    p.add_argument("--transaction-cost", type=float, default=0.001)
+    p.add_argument("--transaction-cost", type=float, default=0.0)
     p.add_argument("--kelly-fraction", type=float, default=0.25)
     p.add_argument("--kelly-payoff-ratio", type=float, default=1.0)
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
@@ -331,6 +350,10 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("epochs and batch sizes must be positive.")
     if args.full_eval_every <= 0:
         raise SystemExit("--full-eval-every must be positive.")
+    if args.min_lr < 0.0:
+        raise SystemExit("--min-lr must be non-negative.")
+    if args.min_lr > args.lr:
+        raise SystemExit("--min-lr must be less than or equal to --lr.")
     return args
 
 
@@ -435,6 +458,8 @@ def _make_logger(
             "fold_tag": fold_tag,
             "epochs": args.epochs,
             "lr": args.lr,
+            "lr_scheduler": args.lr_scheduler,
+            "min_lr": args.min_lr,
             "weight_decay": args.weight_decay,
             "model": args.model,
             "model_dropout": args.model_dropout,
@@ -639,6 +664,7 @@ def run_single_fold(
     w = class_weights_from_dataset(ds_train, n_classes=2)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(w, device=device), ignore_index=-1)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = _make_lr_scheduler(args, optimizer)
 
     owns_logger = logger is None
     logger = logger or _make_logger(args, exp_dir=exp_dir, fold_tag=fold_tag)
@@ -648,6 +674,8 @@ def run_single_fold(
             "fold_tag": fold_tag,
             "epochs": args.epochs,
             "lr": args.lr,
+            "lr_scheduler": args.lr_scheduler,
+            "min_lr": args.min_lr,
             "weight_decay": args.weight_decay,
             "model": args.model,
             "model_dropout": args.model_dropout,
@@ -722,6 +750,7 @@ def run_single_fold(
             device=device,
             evaluator=evaluator,
             logger=logger,
+            scheduler=scheduler,
         )
 
         cfg = TrainConfig(

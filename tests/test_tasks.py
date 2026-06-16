@@ -17,9 +17,9 @@ def test_shared_training_presets_cover_the_five_team_runs() -> None:
     ("preset_name", "model", "epochs", "transaction_cost"),
     [
         ("baseline-no-cost", "conv1d", "30", "0"),
-        ("baseline-cost", "conv1d", "30", "0.001"),
+        ("baseline-cost", "conv1d", "30", "0"),
         ("main-no-cost", "resnet_lstm", "30", "0"),
-        ("main-cost", "resnet_lstm", "30", "0.001"),
+        ("main-cost", "resnet_lstm", "30", "0"),
     ],
 )
 def test_shared_training_preset_command_uses_expected_core_settings(

@@ -62,7 +62,7 @@ what the research question specifies.
 ## Experiments
 
 All runs: same seed (1337), same lookback (12), Conv1D defaults unless stated, transaction
-cost 0.001 for economic metrics (plus the zero-cost `--baseline` preset where noted),
+cost 0 for economic metrics,
 **no** `--no-return-stats` on final runs, all 5 folds for final runs (single fold OK for
 screening). Log to W&B with the run names below.
 
@@ -83,7 +83,7 @@ Same model (Conv1D), same features, same folds. Only bars + labels differ.
 | Run | Sampler | Labels |
 | --- | --- | --- |
 | `E1-timebar` | time_bar 15 min | next-bar direction |
-| `E1-cusum` | tuned CUSUM, 30 bars/day | triple-barrier (hb=2.5%, W=240 min) |
+| `E1-cusum` | tuned CUSUM, 30 bars/day | triple-barrier (hb=2.0%, W=240 min) |
 
 Prepare each, then:
 
@@ -98,7 +98,7 @@ return, max drawdown. This is the direct RQ1/RQ2 answer.
 
 ### E2 — Model complexity (L3) — feeds Report Table 4
 
-Same CUSUM + triple-barrier config (hb=2.5%, W=240 min), all 5 folds:
+Same CUSUM + triple-barrier config (hb=2.0%, W=240 min), all 5 folds:
 
 | Run | Model |
 | --- | --- |

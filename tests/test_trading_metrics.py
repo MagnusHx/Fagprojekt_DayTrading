@@ -323,7 +323,7 @@ def test_compute_paper_trading_metrics_exposes_abstention_debug_metrics_for_dire
         ),
         width_minutes=1439,
         barrier_height=0.05,
-        transaction_cost=0.001,
+        transaction_cost=0.002,
     )
 
     out = compute_paper_trading_metrics(
@@ -349,8 +349,8 @@ def test_compute_paper_trading_metrics_exposes_abstention_debug_metrics_for_dire
     assert out["paper/n_trade_signals_skipped_overlap"] == 0
     assert out["paper/executed_trade_hit_rate_pct"] == pytest.approx(100.0)
     assert out["paper/executed_trade_gross_return_avg_pct"] == pytest.approx(5.0)
-    assert out["paper/executed_trade_net_return_avg_pct"] == pytest.approx(4.8)
-    assert out["paper/transaction_cost_total_pct"] == pytest.approx(0.4)
+    assert out["paper/executed_trade_net_return_avg_pct"] == pytest.approx(4.6)
+    assert out["paper/transaction_cost_total_pct"] == pytest.approx(0.8)
     assert out["paper/long_n_executed_trades"] == 1
     assert out["paper/short_n_executed_trades"] == 1
 
@@ -427,7 +427,7 @@ def test_compute_paper_trading_metrics_handles_zero_executed_trades() -> None:
         ),
         width_minutes=1439,
         barrier_height=0.05,
-        transaction_cost=0.001,
+        transaction_cost=0.002,
     )
 
     out = compute_paper_trading_metrics(

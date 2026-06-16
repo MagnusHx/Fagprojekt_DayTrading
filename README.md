@@ -41,8 +41,8 @@ Experiments answer four research questions via a ladder of comparisons:
 - **E4** (L5): Meta-selection ablation, **RQ4** — Does meta-selection add value?
 - **E0** (RQ1, final summary): Can we translate the crypto method to stocks? Compare best model vs baselines.
 
-All use: seed `1337`, sequence length `12`, Conv1D (default), transaction cost `0.001`, all 5 folds (final runs).
-Fixed triple-barrier parameters: hb=2.5%, W=240 min.
+All use: seed `1337`, sequence length `12`, Conv1D (default), transaction cost `0`, all 5 folds (final runs).
+Fixed triple-barrier parameters: hb=2.0%, W=240 min.
 
 ### Running experiments in order
 
@@ -70,13 +70,13 @@ uv run python -m kvant.ml_prepare_data.prepare_experiment \
 # Prepare E1-cusum data (CUSUM + triple-barrier with fixed params)
 uv run python -m kvant.ml_prepare_data.prepare_experiment \
   --sampler tuned_cusum --target-bars-per-day 15 \
-  --labeler triple_barrier --barrier-height-pct 2.5 --barrier-width 240 \
+  --labeler triple_barrier --barrier-height-pct 2.0 --barrier-width 240 \
   --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json
 
 # Prepare E2 data (same as E1-cusum)
 uv run python -m kvant.ml_prepare_data.prepare_experiment \
   --sampler tuned_cusum --target-bars-per-day 15 \
-  --labeler triple_barrier --barrier-height-pct 2.5 --barrier-width 240 \
+  --labeler triple_barrier --barrier-height-pct 2.0 --barrier-width 240 \
   --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json
 
 # Verify all build items exist
@@ -100,7 +100,7 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --model conv1d --epochs 20 --seed 1337 \
   --checkpoint-out-dir artifacts/E1_timebar \
   --wandb-name E1-timebar \
-  --transaction-cost 0.001
+  --transaction-cost 0
 
 # Train E1-cusum (all 5 folds) — can run in parallel
 uv run python -m kvant.ml_framework.scripts.train_experiment \
@@ -108,7 +108,7 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --model conv1d --epochs 20 --seed 1337 \
   --checkpoint-out-dir artifacts/E1_cusum \
   --wandb-name E1-cusum \
-  --transaction-cost 0.001
+  --transaction-cost 0
 ```
 
 ### E2: Model complexity (L3) — Table 4
@@ -122,7 +122,7 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --model conv1d --epochs 20 --seed 1337 \
   --checkpoint-out-dir artifacts/E2_conv1d \
   --wandb-name E2-conv1d \
-  --transaction-cost 0.001
+  --transaction-cost 0
 
 # E2-resnet (only if E2-conv1d validation F1 > E0-logreg)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
@@ -130,7 +130,7 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --model resnet_lstm --epochs 30 --seed 1337 \
   --checkpoint-out-dir artifacts/E2_resnet \
   --wandb-name E2-resnet \
-  --transaction-cost 0.001
+  --transaction-cost 0
 ```
 
 ### E3: Selective trading / confidence thresholds (RQ3) — Table 5 + figure
@@ -164,7 +164,7 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --no-meta \
   --checkpoint-out-dir artifacts/E4_nometa \
   --wandb-name E4-nometa \
-  --transaction-cost 0.001
+  --transaction-cost 0
 
 # E4-meta-min: Meta with minimal feature set (proba, embedding)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
@@ -173,7 +173,7 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --meta-features proba,embedding \
   --checkpoint-out-dir artifacts/E4_meta_min \
   --wandb-name E4-meta-min \
-  --transaction-cost 0.001
+  --transaction-cost 0
 
 # E4-meta-full: Meta with full feature set (default)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
@@ -182,7 +182,7 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
   --meta-features default \
   --checkpoint-out-dir artifacts/E4_meta_full \
   --wandb-name E4-meta-full \
-  --transaction-cost 0.001
+  --transaction-cost 0
 ```
 
 ### E0: Final Summary (RQ1) — Table 1
@@ -337,19 +337,19 @@ Use these checked-in `invoke` presets when team members need directly comparable
 # One-epoch Conv1D startup check without return simulations or checkpoint output
 uv run invoke smoke --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
 
-# Conv1D baselines, differing only by transaction cost
+# Conv1D baselines using the current zero-cost evaluation protocol
 uv run invoke baseline-no-cost --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
 uv run invoke baseline-cost --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
 
-# Main ResNet-LSTM candidates, differing only by transaction cost
+# Main ResNet-LSTM candidates using the current zero-cost evaluation protocol
 uv run invoke main-no-cost --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
 uv run invoke main-cost --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
 ```
 
 The baseline presets use Conv1D for 30 epochs. The main presets use the current conservative ResNet-LSTM candidate for
-30 epochs. Both use `lr=0.001`, fractional Kelly at `0.25`, a `2%` maximum position fraction, and full validation
-evaluation every 3 epochs. The cost variants use
-`transaction_cost=0.001`; no-cost variants use `0`. The ResNet-LSTM settings are shared candidate parameters, not
+30 epochs. Both use `lr=0.001` with cosine annealing to `min_lr=0.00001`, fractional Kelly at `0.25`, a `2%`
+maximum position fraction, and full validation evaluation every 3 epochs. The legacy `*-cost` presets use
+`transaction_cost=0` for compatibility with the current final-run protocol. The ResNet-LSTM settings are shared candidate parameters, not
 claimed optimal parameters until validation experiments establish that.
 
 Add a deliberate one-off override with `--extra-args`, for example:
@@ -359,6 +359,19 @@ uv run invoke main-cost \
   --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json \
   --extra-args="--seed 7 --wandb-name main-cost-seed7"
 ```
+
+The default training scheduler is cosine annealing. Disable it only for an ablation:
+
+```bash
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json \
+  --lr-scheduler none
+```
+
+For dropout, use a small successive-halving-style screen instead of Hyperband: run one fold for 5 epochs with
+`--model-dropout 0.1`, `0.3`, and `0.5`; keep the best validation `val/meta/f1`, then run that dropout on all folds
+for the final epoch budget. If the top two are effectively tied, prefer the larger dropout because these models have
+shown overfitting risk.
 
 For a local smoke run without cloud logging:
 

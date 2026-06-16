@@ -33,6 +33,7 @@ class Trainer:
         device: torch.device,
         evaluator: Optional[ExperimentEvaluator] = None,
         logger: Optional[Any] = None,
+        scheduler: Optional[Any] = None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -40,6 +41,14 @@ class Trainer:
         self.device = device
         self.evaluator = evaluator
         self.logger = logger
+        self.scheduler = scheduler
+
+    def current_lr(self) -> float:
+        """Return the learning rate for the first optimizer parameter group."""
+        param_groups = getattr(self.optimizer, "param_groups", [])
+        if not param_groups:
+            return 0.0
+        return float(param_groups[0].get("lr", 0.0))
 
     def train_one_epoch(
         self,
@@ -158,6 +167,7 @@ class Trainer:
             metrics: Dict[str, Any] = {}
             metrics["epoch"] = int(ep)
             metrics["train/training/loss"] = float(train_loss)
+            metrics["train/lr"] = self.current_lr()
 
             full_eval = (self.evaluator is not None) and do_full_eval(ep)
 
@@ -194,9 +204,11 @@ class Trainer:
 
             print(
                 f"epoch={ep:04d} train_loss={train_loss:.4f} "
-                f"{cfg.checkpoint_metric}={metric_val:.4f} best={best_metric:.4f} "
+                f"lr={metrics['train/lr']:.6g} {cfg.checkpoint_metric}={metric_val:.4f} best={best_metric:.4f} "
                 f"[{' '.join(timing_metrics)}]",
                 flush=True,
             )
+            if self.scheduler is not None:
+                self.scheduler.step()
 
         return {"best_state": best_state, "best_metric": best_metric}

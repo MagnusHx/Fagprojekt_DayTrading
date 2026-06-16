@@ -58,7 +58,7 @@ def test_train_command_builds_conv1d_threshold_run() -> None:
     cmd = train_command(
         run,
         epochs=20,
-        transaction_cost=0.001,
+        transaction_cost=0.0,
         wandb_project="Kvant",
         extra_args=("--no-save-best-checkpoint",),
     )

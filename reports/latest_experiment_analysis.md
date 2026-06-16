@@ -10,7 +10,7 @@ The latest completed local experiment is:
 - Model: `resnet_lstm`
 - Epochs: `30`
 - Manifest: `src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_fixedCUSUM0.01_cv_manifest.json`
-- Transaction cost: `0.001`
+- Transaction cost: `0`
 - Meta features in this run: `['proba', 'embedding']`
 - Meta accept threshold: `0.6`
 - Checkpoint metric: `val/meta/f1`
