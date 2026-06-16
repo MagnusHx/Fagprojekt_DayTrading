@@ -98,17 +98,17 @@ manifest such as `results/E1_timebar.csv` and `results/E1_cusum.csv`. Override t
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
-  --output-dir artifacts/E1_timebar \
+  --checkpoint-out-dir artifacts/E1_timebar \
   --wandb-name E1-timebar \
-  --log-portfolio-metrics --transaction-cost 0.001
+  --transaction-cost 0.001
 
 # Train E1-cusum (all 5 folds) — can run in parallel
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
-  --output-dir artifacts/E1_cusum \
+  --checkpoint-out-dir artifacts/E1_cusum \
   --wandb-name E1-cusum \
-  --log-portfolio-metrics --transaction-cost 0.001
+  --transaction-cost 0.001
 ```
 
 ### E2: Model complexity (L3) — Table 4
@@ -120,17 +120,17 @@ Trains Conv1D and optionally ResNet-LSTM. All 5 folds. Data prepared above.
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
-  --output-dir artifacts/E2_conv1d \
+  --checkpoint-out-dir artifacts/E2_conv1d \
   --wandb-name E2-conv1d \
-  --log-portfolio-metrics --transaction-cost 0.001
+  --transaction-cost 0.001
 
 # E2-resnet (only if E2-conv1d validation F1 > E0-logreg)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model resnet_lstm --epochs 30 --seed 1337 \
-  --output-dir artifacts/E2_resnet \
+  --checkpoint-out-dir artifacts/E2_resnet \
   --wandb-name E2-resnet \
-  --log-portfolio-metrics --transaction-cost 0.001
+  --transaction-cost 0.001
 ```
 
 ### E3: Selective trading / confidence thresholds (RQ3) — Table 5 + figure
@@ -161,28 +161,28 @@ Compare meta-selection ON vs OFF, and test feature importance. All 5 folds.
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
-  --no-meta --bet-size fixed \
-  --output-dir artifacts/E4_nometa \
+  --no-meta \
+  --checkpoint-out-dir artifacts/E4_nometa \
   --wandb-name E4-nometa \
-  --log-portfolio-metrics --transaction-cost 0.001
+  --transaction-cost 0.001
 
 # E4-meta-min: Meta with minimal feature set (proba, embedding)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
   --meta-features proba,embedding \
-  --output-dir artifacts/E4_meta_min \
+  --checkpoint-out-dir artifacts/E4_meta_min \
   --wandb-name E4-meta-min \
-  --log-portfolio-metrics --transaction-cost 0.001
+  --transaction-cost 0.001
 
 # E4-meta-full: Meta with full feature set (default)
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
   --meta-features default \
-  --output-dir artifacts/E4_meta_full \
+  --checkpoint-out-dir artifacts/E4_meta_full \
   --wandb-name E4-meta-full \
-  --log-portfolio-metrics --transaction-cost 0.001
+  --transaction-cost 0.001
 ```
 
 ### E0: Final Summary (RQ1) — Table 1
