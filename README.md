@@ -20,7 +20,7 @@ The project is built around reproducible walk-forward folds. Data preparation co
 ```txt
 src/kvant/ml_prepare_data/       Data preparation, sampling, features, labeling
 src/kvant/ml_framework/          Prepared data loading, training, validation, logging
-src/kvant/ml_framework/prepared/ Generated prepared fold artifacts and CV manifests (ignored)
+src/kvant/ml_framework/prepared/ Generated prepared fold artifacts and CV manifests; new outputs are gitignored, but a few reference manifests/folds remain checked in
 tests/                           Unit and pipeline-contract tests
 reports/                         Analysis notes and experiment sheets
 docs/                            MkDocs documentation sources
@@ -41,8 +41,9 @@ Experiments answer four research questions via a ladder of comparisons:
 - **E4** (L5): Meta-selection ablation, **RQ4** — Does meta-selection add value?
 - **E0** (RQ1, final summary): Can we translate the crypto method to stocks? Compare best model vs baselines.
 
-All use: seed `1337`, sequence length `12`, Conv1D (default), transaction cost `0`, all 5 folds (final runs).
-Fixed triple-barrier parameters: hb=2.0%, W=240 min.
+The commands below use seed `1337`, sequence length `12`, and transaction cost `0` unless overridden.
+Most training runs use Conv1D; `E2-resnet` and the shared `main-*` presets switch to ResNet-LSTM.
+The checked-in `E1_cusum_cv_manifest.json` currently resolves to `sb_L_12_w240_h2.5_TBPD15`.
 
 ### Running experiments in order
 
@@ -70,13 +71,13 @@ uv run python -m kvant.ml_prepare_data.prepare_experiment \
 # Prepare E1-cusum data (CUSUM + triple-barrier with fixed params)
 uv run python -m kvant.ml_prepare_data.prepare_experiment \
   --sampler tuned_cusum --target-bars-per-day 15 \
-  --labeler triple_barrier --barrier-height-pct 2.0 --barrier-width 240 \
+  --labeler triple_barrier --barrier-height-pct 2.5 --barrier-width 240 \
   --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json
 
 # Prepare E2 data (same as E1-cusum)
 uv run python -m kvant.ml_prepare_data.prepare_experiment \
   --sampler tuned_cusum --target-bars-per-day 15 \
-  --labeler triple_barrier --barrier-height-pct 2.0 --barrier-width 240 \
+  --labeler triple_barrier --barrier-height-pct 2.5 --barrier-width 240 \
   --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json
 
 # Verify all build items exist
@@ -90,8 +91,10 @@ test -f scripts/reconcile_metrics.py && echo "✓ B5: reconcile_metrics.py"
 **Does information-driven sampling + triple-barrier labeling improve performance?**
 
 Compare time bars (simple baseline) vs CUSUM + triple-barrier (information-driven method). Same model (Conv1D), same features — only data pipeline differs. Data prepared above.
-Completed CV training runs automatically write per-fold result CSVs to `results/`, including names derived from the
-manifest such as `results/E1_timebar.csv` and `results/E1_cusum.csv`. Override this with `--results-out` if needed.
+Completed CV training runs automatically write per-fold result CSVs to `results/`. The primary output is
+`results/<wandb-name>.csv`; when the manifest stem differs, the trainer also writes a manifest-derived alias such as
+`results/E1_timebar.csv`. For shared manifests like `E2_cv_manifest.json`, rely on the `results/<wandb-name>.csv`
+path to avoid ambiguity. Override either path with `--results-out` if needed.
 
 ```bash
 # Train E1-timebar (all 5 folds)
@@ -135,13 +138,14 @@ uv run python -m kvant.ml_framework.scripts.train_experiment \
 
 ### E3: Selective trading / confidence thresholds (RQ3) — Table 5 + figure
 
-No retraining. Use best E2 checkpoint, sweep thresholds {0.0, 0.55, 0.65}.
+The repo includes `scripts/reconcile_metrics.py` as a threshold-sweep helper for saved `*.ckpt.pt` bundles. It expects
+a checkpoint written by `train_experiment.py`, for example one of the per-fold files under `--checkpoint-out-dir`.
 
 ```bash
-# Determine E2_BEST_CHECKPOINT from W&B (highest test Sharpe or lowest drawdown)
-export E2_BEST_CHECKPOINT=artifacts/E2_conv1d/best_checkpoint.pth
+# Pick a saved checkpoint bundle from the E2 run
+export E2_BEST_CHECKPOINT=artifacts/E2_conv1d/E2-conv1d-fold00-best.ckpt.pt
 
-# Threshold sweep at eval time (via reconcile_metrics.py)
+# Sweep meta-acceptance thresholds on that bundle
 uv run python scripts/reconcile_metrics.py \
   --checkpoint ${E2_BEST_CHECKPOINT} \
   --thresholds 0.0 0.55 0.65 \
@@ -197,14 +201,16 @@ uv run python scripts/simple_baselines.py \
   --model majority \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --wandb-project day-trading-experiments \
-  --wandb-name E0-majority
+  --wandb-name E0-majority \
+  --output results/E0-majority.csv
 
 # E0-logreg: Logistic regression (simple ML baseline)
 uv run python scripts/simple_baselines.py \
   --model logreg \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --wandb-project day-trading-experiments \
-  --wandb-name E0-logreg
+  --wandb-name E0-logreg \
+  --output results/E0-logreg.csv
 ```
 
 **Results summary:** Once E1–E4 are complete, create Table 1 by comparing:
@@ -219,14 +225,13 @@ uv run python scripts/simple_baselines.py \
 After E1–E4 and E0:
 
 ```bash
-# Aggregate results from W&B
-wandb export --project day-trading-experiments --output results/wandb_export.json
+# CV training runs already write local per-fold CSVs to results/
+ls results/
 
-# Generate tables (aggregate per fold: mean ± std, 95% CI)
-python scripts/generate_tables.py --all --output results/report_tables.csv
-
-# Verify all numbers against W&B
-python scripts/verify_results.py --report results/report_tables.csv
+# If you need to reconstruct one CSV from a local W&B run summary:
+uv run python scripts/extract_wandb_fold_results.py \
+  --summary wandb/run-<timestamp>-<id>/files/wandb-summary.json \
+  --output results/<run-name>.csv
 
 # Archive and commit
 git add reports/ results/
@@ -240,41 +245,41 @@ All metrics are logged with **95% confidence intervals** computed across folds u
 ```bash
 # RQ2: Does information-driven beat timebars?
 uv run python scripts/compare_experiments.py \
-  --results-a results/E1_timebar.csv \
-  --results-b results/E1_cusum.csv \
+  --results-a results/E1-timebar.csv \
+  --results-b results/E1-cusum.csv \
   --name-a "E1-timebar" \
   --name-b "E1-cusum" \
-  --metrics test_accuracy test_f1_macro portfolio/sharpe_ratio_annualized \
+  --metrics test_accuracy test_f1_macro test_portfolio_sharpe_ratio_annualized \
   --wandb-project day-trading-experiments \
   --wandb-name E1-comparison
 
 # Model complexity: Conv1D vs ResNet
 uv run python scripts/compare_experiments.py \
-  --results-a results/E2_conv1d.csv \
-  --results-b results/E2_resnet.csv \
+  --results-a results/E2-conv1d.csv \
+  --results-b results/E2-resnet.csv \
   --name-a "E2-conv1d" \
   --name-b "E2-resnet" \
-  --metrics test_accuracy test_f1_macro portfolio/sharpe_ratio_annualized \
+  --metrics test_accuracy test_f1_macro test_portfolio_sharpe_ratio_annualized \
   --wandb-project day-trading-experiments \
   --wandb-name E2-comparison
 
 # RQ4: Does meta-selection add value?
 uv run python scripts/compare_experiments.py \
-  --results-a results/E4_nometa.csv \
-  --results-b results/E4_meta_full.csv \
+  --results-a results/E4-nometa.csv \
+  --results-b results/E4-meta-full.csv \
   --name-a "E4-nometa" \
   --name-b "E4-meta-full" \
-  --metrics test_accuracy test_f1_macro portfolio/sharpe_ratio_annualized \
+  --metrics test_accuracy test_f1_macro test_portfolio_sharpe_ratio_annualized \
   --wandb-project day-trading-experiments \
   --wandb-name E4-meta-comparison
 
 # RQ1: Does our best model beat trivial baselines?
 uv run python scripts/compare_experiments.py \
-  --results-a results/E0_logreg.csv \
+  --results-a results/E0-logreg.csv \
   --results-b results/<BEST_MODEL>.csv \
   --name-a "E0-logreg (baseline)" \
   --name-b "E0-best (our method)" \
-  --metrics test_accuracy test_f1_macro portfolio/sharpe_ratio_annualized \
+  --metrics test_accuracy test_f1_macro test_portfolio_sharpe_ratio_annualized \
   --wandb-project day-trading-experiments \
   --wandb-name E0-final-comparison
 ```
@@ -387,7 +392,7 @@ uv sync --index pytorch=https://download.pytorch.org/whl/cu124
 
 If you prefer a persistent machine-local override, put it in an ignored `uv.toml`.
 
-Portfolio metrics use a budget-constrained account simulator by default. The simulator applies the same next-sampled-bar entry convention as the backtest, sizes positions from meta bet size, charges entry and exit transaction costs, tracks cash/open positions/exposure, skips trades when budget limits are exhausted, and produces an equity curve. The defaults are `$10,000` initial cash, at most `5%` equity per trade, `100%` total exposure, and at most `10` concurrent positions. Override them with:
+Portfolio metrics use a budget-constrained account simulator by default. The simulator applies the same next-sampled-bar entry convention as the backtest, sizes positions from meta bet size, charges entry and exit transaction costs, tracks cash/open positions/exposure, skips trades when budget limits are exhausted, and produces an equity curve. The defaults are `$10,000` initial cash, at most `2%` equity per trade, `100%` total exposure, and at most `10` concurrent positions. Override them with:
 
 ```bash
 uv run python -m kvant.ml_framework.scripts.train_experiment \
@@ -422,6 +427,6 @@ Portfolio curves are logged as `perf/portfolio_equity_curve/{split}` and `charts
 
 The preferred prepared artifacts are the non-`droptexit` `event_outcome` folds, for example `sb_L_12_w180_h1.5_TBPD30_fold00` through `fold04`. Older `droptexit` artifacts are retained on disk for comparison, but the current training entrypoint expects raw three-class event-outcome artifacts and derives side/meta labels downstream.
 
-Prepared data, W&B runs, checkpoints, caches, generated plots, and generated architecture docs are intentionally ignored. They can be regenerated from the source code and commands above.
+Newly generated prepared data, W&B runs, checkpoints, caches, generated plots, and generated architecture docs are intentionally ignored. A few reference prepared manifests/folds remain checked in, and everything else can be regenerated from the source code and commands above.
 
 This is a research codebase, not a live trading system or investment recommendation.
