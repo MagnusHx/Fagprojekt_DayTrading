@@ -100,12 +100,11 @@ The control computes the average usable samples per ticker-day from the selected
 split only. It then prepares a time-bar baseline with the nearest integer interval that matches this average sample
 density.
 
-Recommended controls:
+Recommended control:
 
 | Control | Label | Purpose |
 | --- | --- | --- |
 | Density-matched timebar | Next-bar direction | Fairer version of the original timebar baseline |
-| Density-matched timebar | Same triple-barrier settings as best CUSUM/TB | Cleaner sampling-only ablation |
 
 ### E3: Model Architecture
 

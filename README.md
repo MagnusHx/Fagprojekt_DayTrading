@@ -283,9 +283,9 @@ uv run python scripts/compare_experiments.py \
 
 This is the main RQ2 comparison.
 
-## Step 8: Prepare Density-Matched Time-Bar Controls
+## Step 8: Prepare Density-Matched Time-Bar Control
 
-These controls test whether CUSUM/TB helps because of better event definition or merely because it changes sample
+This control tests whether CUSUM/TB helps because of better event definition or merely because it changes sample
 density.
 
 Prepare density-matched time bars with next-bar labels:
@@ -299,26 +299,13 @@ uv run python scripts/make_density_matched_timebar.py \
   --execute
 ```
 
-Prepare density-matched time bars with the same triple-barrier settings as the selected CUSUM/TB config:
-
-```bash
-uv run python scripts/make_density_matched_timebar.py \
-  --selection-json artifacts/final_plan/selected_grid.json \
-  --split train \
-  --labeler triple_barrier \
-  --barrier-width 240 \
-  --output-manifest src/kvant/ml_framework/prepared/E2_timebar_density_matched_tb_cv_manifest.json \
-  --execute
-```
-
 Expected outputs:
 
 ```text
 src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json
-src/kvant/ml_framework/prepared/E2_timebar_density_matched_tb_cv_manifest.json
 ```
 
-## Step 9: Train Density-Matched Time-Bar Controls
+## Step 9: Train Density-Matched Time-Bar Control
 
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
@@ -330,23 +317,12 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --transaction-cost 0.001 \
   --no-meta \
   --results-out results/main/E2_timebar_density_matched_nextbar.csv
-
-caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E2_timebar_density_matched_tb_cv_manifest.json \
-  --model conv1d --epochs 20 --seed 1337 \
-  --checkpoint-out-dir artifacts/E2_timebar_density_matched_tb \
-  --wandb-project day-trading-experiments \
-  --wandb-name E2-timebar-density-matched-tb \
-  --transaction-cost 0.001 \
-  --no-meta \
-  --results-out results/main/E2_timebar_density_matched_tb.csv
 ```
 
 Expected outputs:
 
 ```text
 results/main/E2_timebar_density_matched_nextbar.csv
-results/main/E2_timebar_density_matched_tb.csv
 ```
 
 ## Step 10: Dataset Summary Table And Figure
@@ -357,8 +333,7 @@ Run after the selected grid and density-matched manifests exist.
 uv run python scripts/summarize_prepared_manifests.py \
   --manifest Timebar15m=src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --manifest BestCUSUMTB="$BEST_MANIFEST" \
-  --manifest DensityMatchedNextBar=src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json \
-  --manifest DensityMatchedTB=src/kvant/ml_framework/prepared/E2_timebar_density_matched_tb_cv_manifest.json
+  --manifest DensityMatchedNextBar=src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json
 ```
 
 Expected outputs:
@@ -516,7 +491,6 @@ uv run python scripts/generate_experiment_report.py \
   --result E0-buy-and-hold=results/baselines/E0_buy_and_hold.csv \
   --result E1-timebar-conv1d-nometa=results/main/E1_timebar_conv1d_nometa.csv \
   --result E2-timebar-density-matched-nextbar=results/main/E2_timebar_density_matched_nextbar.csv \
-  --result E2-timebar-density-matched-tb=results/main/E2_timebar_density_matched_tb.csv \
   --result "$BEST_GRID_RUN=$BEST_GRID_RESULT" \
   --result "$BEST_RESNET_RUN=$BEST_RESNET_RESULT" \
   --results-glob "$BEST_CONFIDENCE_GLOB" \
@@ -533,7 +507,6 @@ uv run python scripts/generate_experiment_report.py \
   --metric test_pred_side_class_1_pct \
   --comparison E1-timebar-conv1d-nometa="$BEST_GRID_RUN" \
   --comparison E2-timebar-density-matched-nextbar="$BEST_GRID_RUN" \
-  --comparison E2-timebar-density-matched-tb="$BEST_GRID_RUN" \
   --comparison "$BEST_GRID_RUN=$BEST_RESNET_RUN"
 ```
 
