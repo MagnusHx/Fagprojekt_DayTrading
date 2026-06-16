@@ -353,7 +353,9 @@ uv run invoke main-cost --cv-manifest=src/kvant/ml_framework/prepared/<experimen
 
 The baseline presets use Conv1D for 30 epochs. The main presets use the current conservative ResNet-LSTM candidate for
 30 epochs. Both use `lr=0.001` with cosine annealing to `min_lr=0.00001`, fractional Kelly at `0.25`, a `2%`
-maximum position fraction, and full validation evaluation every 3 epochs. The legacy `*-cost` presets use
+maximum position fraction, and full validation evaluation every 3 epochs. Early stopping is available as an opt-in
+override if you want a more paper-like training protocol, but it is off by default so full training curves remain
+comparable across runs. The legacy `*-cost` presets use
 `transaction_cost=0` for compatibility with the current final-run protocol. The ResNet-LSTM settings are shared candidate parameters, not
 claimed optimal parameters until validation experiments establish that.
 
@@ -371,6 +373,14 @@ The default training scheduler is cosine annealing. Disable it only for an ablat
 uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json \
   --lr-scheduler none
+```
+
+Enable early stopping explicitly when you want it:
+
+```bash
+uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json \
+  --early-stopping-patience 5
 ```
 
 For dropout, use a small successive-halving-style screen instead of Hyperband: run one fold for 5 epochs with

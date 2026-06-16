@@ -262,6 +262,18 @@ def parse_args() -> argparse.Namespace:
         default=3,
         help="Run expensive full evaluation every N epochs; epoch 1 and the final epoch are always evaluated.",
     )
+    p.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="Stop training after this many checkpoint-metric evaluations without improvement. Default 0 disables it.",
+    )
+    p.add_argument(
+        "--early-stopping-min-delta",
+        type=float,
+        default=0.0,
+        help="Minimum checkpoint-metric improvement required to reset early-stopping patience.",
+    )
     p.add_argument("--no-return-stats", action="store_true")
     p.add_argument("--pipeline-stage", type=str, choices=("primary_side",), default="primary_side")
     p.add_argument("--initial-portfolio", type=float, default=1.0)
@@ -350,10 +362,16 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("epochs and batch sizes must be positive.")
     if args.full_eval_every <= 0:
         raise SystemExit("--full-eval-every must be positive.")
+    if args.early_stopping_patience < 0:
+        raise SystemExit("--early-stopping-patience must be non-negative.")
+    if args.early_stopping_min_delta < 0.0:
+        raise SystemExit("--early-stopping-min-delta must be non-negative.")
     if args.min_lr < 0.0:
         raise SystemExit("--min-lr must be non-negative.")
     if args.min_lr > args.lr:
         raise SystemExit("--min-lr must be less than or equal to --lr.")
+    if args.early_stopping_patience == 0:
+        args.early_stopping_patience = None
     return args
 
 
@@ -412,6 +430,10 @@ def _save_best_checkpoint_bundle(
         "run_metadata": {
             "git_commit": git_commit_or_none(Path(__file__).resolve().parents[4]),
             "seed": int(getattr(args, "seed", 0)),
+            "early_stopping_patience": None
+            if args.early_stopping_patience is None
+            else int(args.early_stopping_patience),
+            "early_stopping_min_delta": float(args.early_stopping_min_delta),
         },
         "eval_config": {
             "compute_per_ticker_accuracy": True,
@@ -472,6 +494,10 @@ def _make_logger(
             "train_batch_size": args.train_batch_size,
             "eval_batch_size": args.eval_batch_size,
             "full_eval_every": getattr(args, "full_eval_every", 3),
+            "early_stopping_patience": None
+            if args.early_stopping_patience is None
+            else int(args.early_stopping_patience),
+            "early_stopping_min_delta": float(args.early_stopping_min_delta),
             "wandb_metric_mode": "compact",
             "class_weights": None,
             "pipeline_stage": args.pipeline_stage,
@@ -761,6 +787,8 @@ def run_single_fold(
             eval_batch_size=args.eval_batch_size,
             checkpoint_metric="val/meta/f1",
             full_eval_every=getattr(args, "full_eval_every", 3),
+            early_stopping_patience=args.early_stopping_patience,
+            early_stopping_min_delta=float(args.early_stopping_min_delta),
         )
 
         out = trainer.fit(
@@ -786,11 +814,11 @@ def run_single_fold(
         best_metrics = evaluator.evaluate_all(
             model,
             {"train": dl_train_eval, "val": dl_val, "test": dl_test},
-            step=args.epochs + 1,
+            step=int(out["epochs_ran"]) + 1,
             metric_splits=("val", "test"),
             detailed=True,
         )
-        logger.child(namespace="best").log(best_metrics, step=args.epochs + 1)
+        logger.child(namespace="best").log(best_metrics, step=int(out["epochs_ran"]) + 1)
         fold_idx = int(str(fold_tag).removeprefix("fold")) if fold_tag is not None else 0
         return {
             "best_metric": float(out["best_metric"]),

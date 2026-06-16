@@ -21,6 +21,8 @@ class TrainConfig:
 
     full_eval_every: int = 1
     progress_batches: int = 250
+    early_stopping_patience: int | None = None
+    early_stopping_min_delta: float = 0.0
 
 
 class Trainer:
@@ -142,6 +144,10 @@ class Trainer:
     ) -> Dict[str, Any]:
         best_state = None
         best_metric = -float("inf")
+        best_epoch: int | None = None
+        epochs_ran = 0
+        evaluations_without_improvement = 0
+        stopped_early = False
 
         import time
         import numpy as np
@@ -154,6 +160,7 @@ class Trainer:
             return (epoch % every == 0) or (epoch == 1) or (epoch == cfg.epochs)
 
         for ep in range(1, cfg.epochs + 1):
+            epochs_ran = ep
             t0 = time.time()
             print(f"Starting epoch {ep}/{cfg.epochs}...", flush=True)
             train_loss = self.train_one_epoch(
@@ -193,9 +200,16 @@ class Trainer:
                 self.logger.log(dict(metrics), step=ep)
 
             metric_val = float(metrics.get(cfg.checkpoint_metric, -float("inf")))
-            if metric_val > best_metric:
-                best_metric = metric_val
-                best_state = {k: v.detach().cpu().clone() for k, v in self.model.state_dict().items()}
+            metric_available = cfg.checkpoint_metric in metrics
+            if metric_available:
+                improved = metric_val > (best_metric + float(cfg.early_stopping_min_delta))
+                if improved:
+                    best_metric = metric_val
+                    best_epoch = ep
+                    evaluations_without_improvement = 0
+                    best_state = {k: v.detach().cpu().clone() for k, v in self.model.state_dict().items()}
+                elif cfg.early_stopping_patience is not None:
+                    evaluations_without_improvement += 1
 
             totals = {k: sum(v) for k, v in tspend.items()}
             totals = {k + "(pct)": v / sum(totals.values()) for k, v in totals.items()}
@@ -211,4 +225,24 @@ class Trainer:
             if self.scheduler is not None:
                 self.scheduler.step()
 
-        return {"best_state": best_state, "best_metric": best_metric}
+            if (
+                metric_available
+                and cfg.early_stopping_patience is not None
+                and evaluations_without_improvement >= cfg.early_stopping_patience
+            ):
+                stopped_early = True
+                print(
+                    "Early stopping triggered "
+                    f"at epoch {ep}: no {cfg.checkpoint_metric} improvement for "
+                    f"{evaluations_without_improvement} evaluation(s).",
+                    flush=True,
+                )
+                break
+
+        return {
+            "best_state": best_state,
+            "best_metric": best_metric,
+            "best_epoch": best_epoch,
+            "epochs_ran": epochs_ran,
+            "stopped_early": stopped_early,
+        }

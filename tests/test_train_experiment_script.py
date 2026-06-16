@@ -35,10 +35,23 @@ def test_recommended_training_defaults(monkeypatch, tmp_path) -> None:
     assert args.lr_scheduler == "cosine"
     assert args.min_lr == 1e-5
     assert args.full_eval_every == 3
+    assert args.early_stopping_patience is None
+    assert args.early_stopping_min_delta == 0.0
     assert args.kelly_fraction == 0.25
     assert args.portfolio_max_position_fraction == 0.02
     assert args.meta_accept_threshold == 0.5
     assert args.results_out is None
+
+
+def test_parse_args_can_enable_early_stopping(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        ["train_experiment", "--exp-dir", str(tmp_path), "--early-stopping-patience", "5"],
+    )
+
+    args = parse_args()
+
+    assert args.early_stopping_patience == 5
 
 
 def test_baseline_preset_forces_conv1d_and_zero_cost() -> None:
