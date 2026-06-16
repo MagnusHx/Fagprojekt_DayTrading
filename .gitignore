@@ -5,7 +5,6 @@ docs/generated/
 docs/site/
 src/kvant/ml_framework/prepared/
 wandb/
-results/
 outputs/
 .env
 
