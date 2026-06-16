@@ -1,442 +1,615 @@
-# kvant
+# Day Trading as a Multi-Level Decision Problem
 
-`kvant` is a quant research project for short-horizon US equity trading on minute-level OHLCV data. The current approach follows a Lopez de Prado-inspired side-plus-meta-labeling workflow: prepared artifacts keep the raw three-class triple-barrier event outcome (`down`, `exit`, `up`), the training pipeline derives a binary primary side target (`down`, `up`), and a meta-label layer decides whether a predicted side should be traded or abstained from.
+This README is the reproducibility runbook. Run the commands in order from the repository root. The intended outcome is:
 
-The project is built around reproducible walk-forward folds. Data preparation computes technical features on minute bars before sampling, fits all learned preparation state on train data only, and then prepares train/validation/test artifacts with sampled OHLCV, labels, metadata, and diagnostics. Training consumes those prepared artifacts with PyTorch models, validates the artifact contract before running, logs metrics through W&B, and evaluates model quality, decision quality, paper-style trade diagnostics, and a stricter budget-constrained portfolio simulator under transaction costs.
+- prepared data manifests
+- W&B runs with stable names
+- per-fold result CSV files
+- selected best CUSUM/triple-barrier config
+- statistical comparisons
+- report-ready LaTeX tables
+- report-ready PNG/PDF figures
 
-## Current pipeline
+The project is reference-inspired, not a direct reproduction of the crypto paper. We test whether the general pipeline
+transfers to intraday U.S. equities.
 
-1. Download/cache minute OHLCV shards from Hugging Face and build walk-forward splits of top-volume US equities.
-2. Fit a train-only `TunedCUSUMBarSampler` targeting a configurable bars-per-day density.
-3. Compute intraday technical features on minute bars before sampling, standardize them from train data, and select features for the primary side task with train-only F-score selection.
-4. Label sampled bars with triple-barrier outcomes and persist the canonical `event_outcome` label space.
-5. Enforce live-safe label and backtest timing: the sampled bar is the signal, trades enter on the next sampled bar, and label intervals crossing split boundaries are purged/embargoed.
-6. Train a primary side classifier on actionable `down/up` events while retaining `exit` rows for decision and abstention evaluation.
-7. Fit/evaluate the meta-label decision policy using model probabilities, embeddings, uncertainty, prepared volatility/return aliases, rolling ticker win/return statistics, and time-since-event context.
-8. Report side, meta, decision, execution, paper-economics, and portfolio-account metrics.
+## Research Questions
 
-## Important paths
+```text
+RQ1: How does a reference-inspired machine learning trading pipeline perform when applied to intraday U.S. equities?
 
-```txt
-src/kvant/ml_prepare_data/       Data preparation, sampling, features, labeling
-src/kvant/ml_framework/          Prepared data loading, training, validation, logging
-src/kvant/ml_framework/prepared/ Generated prepared fold artifacts and CV manifests; new outputs are gitignored, but a few reference manifests/folds remain checked in
-tests/                           Unit and pipeline-contract tests
-reports/                         Analysis notes and experiment sheets
-docs/                            MkDocs documentation sources
-references/                      Source papers used by reports
-artifacts/                       Generated diagnostics, plots, checkpoints, and smoke reports (ignored)
+RQ2: Does CUSUM sampling with triple-barrier labelling improve predictive and economic performance compared with a
+     time-based baseline?
+
+RQ3: Does confidence-based selective trading improve the quality and risk-adjusted performance of executed trades?
+
+RQ4: Does a learned meta-selection model improve trade selection beyond the primary model's own confidence?
 ```
 
-## Running the 8-Day Experiment Plan
+## Fixed Configuration
 
-Follow the exact commands below to reproduce experiments E1–E4 from [experiment_plan_8day.md](reports/experiment_plan_8day.md), then E0 as a final summary.
+| Parameter | Value |
+| --- | --- |
+| Ticker universe size | 20 |
+| Ticker selection | Top dollar volume using train data only |
+| Walk-forward folds | 5 |
+| Train/validation/test | 1 year / 1 quarter / 1 quarter |
+| Sequence length | 12 |
+| Time-bar baseline | 15 minutes |
+| CUSUM thresholds | 1%, 2%, 3% |
+| Triple-barrier heights | 1%, 2%, 4%, 6% |
+| Vertical barrier width | 240 minutes |
+| Transaction cost | 0.001 |
+| Random seed | 1337 |
+| W&B project | `day-trading-experiments` |
 
-### Overview
+## Output Locations
 
-Experiments answer four research questions via a ladder of comparisons:
-- **E1** (L1 & L2): Time bars vs CUSUM, **RQ2** — Does information-driven sampling improve performance?
-- **E2** (L3): Model complexity (Conv1D vs ResNet-LSTM) — bonus insight
-- **E3** (L4): Selective trading / confidence thresholds, **RQ3** — Does selective trading improve risk-adjusted returns?
-- **E4** (L5): Meta-selection ablation, **RQ4** — Does meta-selection add value?
-- **E0** (RQ1, final summary): Can we translate the crypto method to stocks? Compare best model vs baselines.
+```text
+results/baselines/             simple baselines and buy-and-hold
+results/grid_search/           CUSUM/TB grid, ResNet, confidence, and meta sweeps
+results/main/                  timebar and density-matched timebar controls
+reports/generated/tables/      CSV and LaTeX tables
+reports/generated/figures/     PNG and PDF figures
+artifacts/final_plan/          generated command plans and selected config files
+artifacts/                     checkpoints
+```
 
-The commands below use seed `1337`, sequence length `12`, and transaction cost `0` unless overridden.
-Most training runs use Conv1D; `E2-resnet` and the shared `main-*` presets switch to ResNet-LSTM.
-The checked-in `E1_cusum_cv_manifest.json` currently resolves to `sb_L_12_w240_h2.5_TBPD15`.
-
-### Running experiments in order
-
-Recommended sequence:
-
-1. **Prepare all data** (B1–B5): create E1_timebar, E1_cusum, E2 manifests (~20 min)
-2. **E1** (RQ2): E1-timebar + E1-cusum in parallel or sequential (~2 hours per arm, 5 folds)
-3. **E2** (Model complexity): E2-conv1d, then E2-resnet if E2-conv1d beats baselines (~2 hours)
-4. **E3** (RQ3): Threshold sweep on best E2 checkpoint (~30 min)
-5. **E4** (RQ4): 3 meta ablation arms on same E2 manifest (~3 hours)
-6. **E0** (RQ1, final): Compare best model from E1–E4 vs trivial baselines (~10 min)
-7. **Analysis**: aggregate results, run statistical comparisons, write report
-
-### Prepare all data first (B1–B5 prerequisite)
-
-Run these preparation steps once, then all experiments use the outputs:
+## Step 0: Install And Smoke Check
 
 ```bash
-# Prepare E1-timebar data (B1+B2: time-bar sampler + next-bar labeler)
+uv sync
+uv run python -m pytest tests/test_experiment_grid.py
+uv run ruff check .
+```
+
+On macOS, long training commands use `caffeinate -dims` so the machine does not sleep.
+
+## Step 0b: Lock W&B Project For Everyone
+
+Every group member must use the same W&B project and entity before running experiments:
+
+```bash
+export WANDB_PROJECT=day-trading-experiments
+export WANDB_ENTITY=s245509-danmarks-tekniske-universitet-dtu
+```
+
+Optional local `.env` setup:
+
+```bash
+cp .env.example .env
+```
+
+Do not change these values between runs. All experiment scripts use these values by default, and grid-generated training
+commands pass the same project/entity through to `train_experiment`.
+
+## Step 1: Prepare The 15-Minute Time-Bar Baseline
+
+```bash
 uv run python -m kvant.ml_prepare_data.prepare_experiment \
   --sampler time_bar --time-bar-minutes 15 \
   --labeler next_bar \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json
-
-# Prepare E1-cusum data (CUSUM + triple-barrier with fixed params)
-uv run python -m kvant.ml_prepare_data.prepare_experiment \
-  --sampler tuned_cusum --target-bars-per-day 15 \
-  --labeler triple_barrier --barrier-height-pct 2.5 --barrier-width 240 \
-  --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json
-
-# Prepare E2 data (same as E1-cusum)
-uv run python -m kvant.ml_prepare_data.prepare_experiment \
-  --sampler tuned_cusum --target-bars-per-day 15 \
-  --labeler triple_barrier --barrier-height-pct 2.5 --barrier-width 240 \
-  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json
-
-# Verify all build items exist
-test -f scripts/simple_baselines.py && echo "✓ B3: simple_baselines.py"
-uv run python -m kvant.ml_framework.scripts.train_experiment --help | grep -q "no-meta" && echo "✓ B4: --no-meta flag"
-test -f scripts/reconcile_metrics.py && echo "✓ B5: reconcile_metrics.py"
 ```
 
-### E1: RQ2 head-to-head (L1 vs L2) — Table 2 + equity curves
+Expected output:
 
-**Does information-driven sampling + triple-barrier labeling improve performance?**
+```text
+src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json
+```
 
-Compare time bars (simple baseline) vs CUSUM + triple-barrier (information-driven method). Same model (Conv1D), same features — only data pipeline differs. Data prepared above.
-Completed CV training runs automatically write per-fold result CSVs to `results/`. The primary output is
-`results/<wandb-name>.csv`; when the manifest stem differs, the trainer also writes a manifest-derived alias such as
-`results/E1_timebar.csv`. For shared manifests like `E2_cv_manifest.json`, rely on the `results/<wandb-name>.csv`
-path to avoid ambiguity. Override either path with `--results-out` if needed.
+## Step 2: Prepare The Full CUSUM/TB Grid
+
+This prepares all 12 data configurations:
+
+```text
+CUSUM h = 0.01, 0.02, 0.03
+TB height = 1%, 2%, 4%, 6%
+W = 240 minutes
+```
+
+First print/write the command plan:
 
 ```bash
-# Train E1-timebar (all 5 folds)
-uv run python -m kvant.ml_framework.scripts.train_experiment \
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid prepare \
+  --plan-out artifacts/final_plan/prepare_grid_commands.json
+```
+
+Then execute all missing preparations:
+
+```bash
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid prepare \
+  --execute \
+  --plan-out artifacts/final_plan/prepare_grid_commands.json
+```
+
+Expected outputs:
+
+```text
+artifacts/final_plan/prepare_grid_commands.json
+src/kvant/ml_framework/prepared/sb_L_12_w240_h1_fixedCUSUM0.01_cv_manifest.json
+src/kvant/ml_framework/prepared/sb_L_12_w240_h2_fixedCUSUM0.01_cv_manifest.json
+...
+src/kvant/ml_framework/prepared/sb_L_12_w240_h6_fixedCUSUM0.03_cv_manifest.json
+```
+
+## Step 3: Train The 15-Minute Time-Bar Conv1D Baseline
+
+```bash
+caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
-  --checkpoint-out-dir artifacts/E1_timebar \
-  --wandb-name E1-timebar \
-  --transaction-cost 0
-
-# Train E1-cusum (all 5 folds) — can run in parallel
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E1_cusum_cv_manifest.json \
-  --model conv1d --epochs 20 --seed 1337 \
-  --checkpoint-out-dir artifacts/E1_cusum \
-  --wandb-name E1-cusum \
-  --transaction-cost 0
-```
-
-### E2: Model complexity (L3) — Table 4
-
-Trains Conv1D and optionally ResNet-LSTM. All 5 folds. Data prepared above.
-
-```bash
-# E2-conv1d (mandatory)
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
-  --model conv1d --epochs 20 --seed 1337 \
-  --checkpoint-out-dir artifacts/E2_conv1d \
-  --wandb-name E2-conv1d \
-  --transaction-cost 0
-
-# E2-resnet (only if E2-conv1d validation F1 > E0-logreg)
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
-  --model resnet_lstm --epochs 30 --seed 1337 \
-  --checkpoint-out-dir artifacts/E2_resnet \
-  --wandb-name E2-resnet \
-  --transaction-cost 0
-```
-
-### E3: Selective trading / confidence thresholds (RQ3) — Table 5 + figure
-
-The repo includes `scripts/reconcile_metrics.py` as a threshold-sweep helper for saved `*.ckpt.pt` bundles. It expects
-a checkpoint written by `train_experiment.py`, for example one of the per-fold files under `--checkpoint-out-dir`.
-
-```bash
-# Pick a saved checkpoint bundle from the E2 run
-export E2_BEST_CHECKPOINT=artifacts/E2_conv1d/E2-conv1d-fold00-best.ckpt.pt
-
-# Sweep meta-acceptance thresholds on that bundle
-uv run python scripts/reconcile_metrics.py \
-  --checkpoint ${E2_BEST_CHECKPOINT} \
-  --thresholds 0.0 0.55 0.65 \
-  --output results/E3_threshold_sweep.csv \
+  --checkpoint-out-dir artifacts/E1_timebar_conv1d_nometa \
   --wandb-project day-trading-experiments \
-  --wandb-name E3-threshold-sweep
-```
-
-### E4: Meta-selection ablation (RQ4) — Table 6
-
-**Can a learned meta-model improve trade selection beyond simple thresholds?**
-
-Compare meta-selection ON vs OFF, and test feature importance. All 5 folds.
-
-```bash
-# E4-nometa: Every signal, fixed bet size (no meta, no Kelly)
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
-  --model conv1d --epochs 20 --seed 1337 \
+  --wandb-name E1-timebar-conv1d-nometa \
+  --transaction-cost 0.001 \
   --no-meta \
-  --checkpoint-out-dir artifacts/E4_nometa \
-  --wandb-name E4-nometa \
-  --transaction-cost 0
-
-# E4-meta-min: Meta with minimal feature set (proba, embedding)
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
-  --model conv1d --epochs 20 --seed 1337 \
-  --meta-features proba,embedding \
-  --checkpoint-out-dir artifacts/E4_meta_min \
-  --wandb-name E4-meta-min \
-  --transaction-cost 0
-
-# E4-meta-full: Meta with full feature set (default)
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/E2_cv_manifest.json \
-  --model conv1d --epochs 20 --seed 1337 \
-  --meta-features default \
-  --checkpoint-out-dir artifacts/E4_meta_full \
-  --wandb-name E4-meta-full \
-  --transaction-cost 0
+  --results-out results/main/E1_timebar_conv1d_nometa.csv
 ```
 
-### E0: Final Summary (RQ1) — Table 1
+Expected output:
 
-**Can we translate the crypto trading pipeline to US equities?**
+```text
+results/main/E1_timebar_conv1d_nometa.csv
+```
 
-After E1–E4, compare your best model against trivial baselines:
+## Step 4: Train The CUSUM/TB Conv1D Grid
+
+First print/write the command plan:
 
 ```bash
-# E0-majority: Predict majority class
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d \
+  --wandb-project day-trading-experiments \
+  --extra-train-arg=--seed \
+  --extra-train-arg 1337 \
+  --plan-out artifacts/final_plan/train_grid_commands.json
+```
+
+Then execute the full grid:
+
+```bash
+caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d \
+  --execute \
+  --wandb-project day-trading-experiments \
+  --extra-train-arg=--seed \
+  --extra-train-arg 1337 \
+  --plan-out artifacts/final_plan/train_grid_commands.json
+```
+
+Expected outputs:
+
+```text
+artifacts/final_plan/train_grid_commands.json
+results/grid_search/E2-grid-conv1d-w240-tb1-cusum1-nometa.csv
+results/grid_search/E2-grid-conv1d-w240-tb2-cusum1-nometa.csv
+...
+results/grid_search/E2-grid-conv1d-w240-tb6-cusum3-nometa.csv
+```
+
+To split the grid across machines, use the same command with different `--start-index` and `--max-runs`. Example:
+
+```bash
+caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d \
+  --execute \
+  --start-index 0 \
+  --max-runs 4 \
+  --wandb-project day-trading-experiments \
+  --extra-train-arg=--seed \
+  --extra-train-arg 1337
+```
+
+## Step 5: Select The Best Grid Config
+
+This uses validation metrics only. The default primary selection metric is `val_f1_macro`, with validation Sharpe and
+validation total return as tie-breakers.
+
+```bash
+uv run python scripts/select_best_grid_config.py \
+  --results-glob "results/grid_search/E2-grid-conv1d-w240-*.csv" \
+  --primary-metric val_f1_macro \
+  --selection-json artifacts/final_plan/selected_grid.json \
+  --env-out artifacts/final_plan/selected_grid.env \
+  --promising-out reports/promising_grid_configs.json
+```
+
+Expected outputs:
+
+```text
+artifacts/final_plan/selected_grid.json
+artifacts/final_plan/selected_grid.env
+reports/promising_grid_configs.json
+```
+
+Load the selected config into the current terminal:
+
+```bash
+source artifacts/final_plan/selected_grid.env
+```
+
+Quick check:
+
+```bash
+echo "$BEST_GRID_RUN"
+echo "$BEST_GRID_RESULT"
+echo "$BEST_MANIFEST"
+```
+
+## Step 6: Generate Grid Tables And Heatmaps
+
+```bash
+uv run python scripts/generate_experiment_report.py \
+  --results-glob "results/grid_search/E2-grid-conv1d-w240-*.csv" \
+  --metric val_f1_macro \
+  --metric val_portfolio_sharpe_ratio_annualized \
+  --metric val_portfolio_total_return_pct \
+  --metric test_f1_macro \
+  --metric test_portfolio_sharpe_ratio_annualized \
+  --metric test_portfolio_total_return_pct \
+  --grid-heatmap-metric val_f1_macro
+```
+
+Expected outputs:
+
+```text
+reports/generated/tables/summary_metrics.csv
+reports/generated/tables/summary_metrics.tex
+reports/generated/figures/grid_heatmap_val_f1_macro.png
+reports/generated/figures/grid_heatmap_val_f1_macro.pdf
+```
+
+## Step 7: Compare Time-Bar Conv1D Against Best CUSUM/TB Conv1D
+
+Run after `source artifacts/final_plan/selected_grid.env`.
+
+```bash
+uv run python scripts/compare_experiments.py \
+  --results-a results/main/E1_timebar_conv1d_nometa.csv \
+  --results-b "$BEST_GRID_RESULT" \
+  --name-a E1-timebar-conv1d-nometa \
+  --name-b "$BEST_GRID_RUN" \
+  --metrics \
+    test_accuracy \
+    test_f1_macro \
+    test_trade_signal_rate \
+    test_directional_acted_accuracy \
+    test_portfolio_total_return_pct \
+    test_portfolio_sharpe_ratio_annualized \
+    test_portfolio_max_drawdown_pct \
+    test_pred_side_class_0_pct \
+    test_pred_side_class_1_pct \
+  --wandb-project day-trading-experiments \
+  --wandb-name E2-timebar-vs-best-cusumtb
+```
+
+This is the main RQ2 comparison.
+
+## Step 8: Prepare Density-Matched Time-Bar Controls
+
+These controls test whether CUSUM/TB helps because of better event definition or merely because it changes sample
+density.
+
+Prepare density-matched time bars with next-bar labels:
+
+```bash
+uv run python scripts/make_density_matched_timebar.py \
+  --selection-json artifacts/final_plan/selected_grid.json \
+  --split train \
+  --labeler next_bar \
+  --output-manifest src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json \
+  --execute
+```
+
+Prepare density-matched time bars with the same triple-barrier settings as the selected CUSUM/TB config:
+
+```bash
+uv run python scripts/make_density_matched_timebar.py \
+  --selection-json artifacts/final_plan/selected_grid.json \
+  --split train \
+  --labeler triple_barrier \
+  --barrier-width 240 \
+  --output-manifest src/kvant/ml_framework/prepared/E2_timebar_density_matched_tb_cv_manifest.json \
+  --execute
+```
+
+Expected outputs:
+
+```text
+src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json
+src/kvant/ml_framework/prepared/E2_timebar_density_matched_tb_cv_manifest.json
+```
+
+## Step 9: Train Density-Matched Time-Bar Controls
+
+```bash
+caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json \
+  --model conv1d --epochs 20 --seed 1337 \
+  --checkpoint-out-dir artifacts/E2_timebar_density_matched_nextbar \
+  --wandb-project day-trading-experiments \
+  --wandb-name E2-timebar-density-matched-nextbar \
+  --transaction-cost 0.001 \
+  --no-meta \
+  --results-out results/main/E2_timebar_density_matched_nextbar.csv
+
+caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
+  --cv-manifest src/kvant/ml_framework/prepared/E2_timebar_density_matched_tb_cv_manifest.json \
+  --model conv1d --epochs 20 --seed 1337 \
+  --checkpoint-out-dir artifacts/E2_timebar_density_matched_tb \
+  --wandb-project day-trading-experiments \
+  --wandb-name E2-timebar-density-matched-tb \
+  --transaction-cost 0.001 \
+  --no-meta \
+  --results-out results/main/E2_timebar_density_matched_tb.csv
+```
+
+Expected outputs:
+
+```text
+results/main/E2_timebar_density_matched_nextbar.csv
+results/main/E2_timebar_density_matched_tb.csv
+```
+
+## Step 10: Dataset Summary Table And Figure
+
+Run after the selected grid and density-matched manifests exist.
+
+```bash
+uv run python scripts/summarize_prepared_manifests.py \
+  --manifest Timebar15m=src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
+  --manifest BestCUSUMTB="$BEST_MANIFEST" \
+  --manifest DensityMatchedNextBar=src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json \
+  --manifest DensityMatchedTB=src/kvant/ml_framework/prepared/E2_timebar_density_matched_tb_cv_manifest.json
+```
+
+Expected outputs:
+
+```text
+reports/generated/tables/dataset_summary.csv
+reports/generated/tables/dataset_summary.tex
+reports/generated/figures/sample_count_comparison.png
+reports/generated/figures/sample_count_comparison.pdf
+```
+
+## Step 11: Run Simple Scikit-Learn Baselines On The Selected Config
+
+Run after `source artifacts/final_plan/selected_grid.env`.
+
+```bash
 uv run python scripts/simple_baselines.py \
   --model majority \
-  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
+  --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-majority \
-  --output results/E0-majority.csv
+  --output results/baselines/E0_majority.csv
 
-# E0-logreg: Logistic regression (simple ML baseline)
+uv run python scripts/simple_baselines.py \
+  --model random \
+  --cv-manifest "$BEST_MANIFEST" \
+  --wandb-project day-trading-experiments \
+  --wandb-name E0-random \
+  --output results/baselines/E0_random.csv
+
 uv run python scripts/simple_baselines.py \
   --model logreg \
-  --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
+  --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-logreg \
-  --output results/E0-logreg.csv
-```
+  --output results/baselines/E0_logreg.csv
 
-**Results summary:** Once E1–E4 are complete, create Table 1 by comparing:
-- E0-majority (worst baseline)
-- E0-logreg (simple ML baseline)
-- Best model from E1–E4 (e.g., E1-cusum if it beats E0-logreg, or E4-meta-full if meta adds value)
-
-**Interpretation:** If your best model beats E0-logreg **statistically significantly** (p < 0.05), RQ1 is answered YES — the method transfers to stocks.
-
-### Results and reporting
-
-After E1–E4 and E0:
-
-```bash
-# CV training runs already write local per-fold CSVs to results/
-ls results/
-
-# If you need to reconstruct one CSV from a local W&B run summary:
-uv run python scripts/extract_wandb_fold_results.py \
-  --summary wandb/run-<timestamp>-<id>/files/wandb-summary.json \
-  --output results/<run-name>.csv
-
-# Archive and commit
-git add reports/ results/
-git commit -m "Experiments E1-E4 + E0 complete: $(date +%Y-%m-%d)"
-```
-
-### Statistical analysis
-
-All metrics are logged with **95% confidence intervals** computed across folds using t-distribution. To make statistical comparisons between experiments:
-
-```bash
-# RQ2: Does information-driven beat timebars?
-uv run python scripts/compare_experiments.py \
-  --results-a results/E1-timebar.csv \
-  --results-b results/E1-cusum.csv \
-  --name-a "E1-timebar" \
-  --name-b "E1-cusum" \
-  --metrics test_accuracy test_f1_macro test_portfolio_sharpe_ratio_annualized \
+uv run python scripts/simple_baselines.py \
+  --model random_forest \
+  --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
-  --wandb-name E1-comparison
+  --wandb-name E0-random-forest \
+  --output results/baselines/E0_random_forest.csv
+```
 
-# Model complexity: Conv1D vs ResNet
-uv run python scripts/compare_experiments.py \
-  --results-a results/E2-conv1d.csv \
-  --results-b results/E2-resnet.csv \
-  --name-a "E2-conv1d" \
-  --name-b "E2-resnet" \
-  --metrics test_accuracy test_f1_macro test_portfolio_sharpe_ratio_annualized \
+Optional:
+
+```bash
+uv run python scripts/simple_baselines.py \
+  --model hist_gb \
+  --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
-  --wandb-name E2-comparison
+  --wandb-name E0-hist-gb \
+  --output results/baselines/E0_hist_gb.csv
+```
 
-# RQ4: Does meta-selection add value?
-uv run python scripts/compare_experiments.py \
-  --results-a results/E4-nometa.csv \
-  --results-b results/E4-meta-full.csv \
-  --name-a "E4-nometa" \
-  --name-b "E4-meta-full" \
-  --metrics test_accuracy test_f1_macro test_portfolio_sharpe_ratio_annualized \
+## Step 12: Run Buy-And-Hold Baseline On The Selected Config
+
+```bash
+uv run python scripts/buy_and_hold_baseline.py \
+  --cv-manifest "$BEST_MANIFEST" \
+  --transaction-cost 0.001 \
   --wandb-project day-trading-experiments \
-  --wandb-name E4-meta-comparison
+  --wandb-name E0-buy-and-hold \
+  --output results/baselines/E0_buy_and_hold.csv
+```
 
-# RQ1: Does our best model beat trivial baselines?
-uv run python scripts/compare_experiments.py \
-  --results-a results/E0-logreg.csv \
-  --results-b results/<BEST_MODEL>.csv \
-  --name-a "E0-logreg (baseline)" \
-  --name-b "E0-best (our method)" \
-  --metrics test_accuracy test_f1_macro test_portfolio_sharpe_ratio_annualized \
+## Step 13: Train ResNet-LSTM On The Selected Config
+
+`Step 5` already wrote `reports/promising_grid_configs.json`, so this command uses the selected CUSUM/TB config.
+
+```bash
+caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-resnet \
+  --execute \
   --wandb-project day-trading-experiments \
-  --wandb-name E0-final-comparison
+  --extra-train-arg=--seed \
+  --extra-train-arg 1337
 ```
 
-**Statistical outputs:**
-- **95% CI**: logged to W&B for each metric (e.g., `{metric}/ci_lower`, `{metric}/ci_upper`)
-- **Paired t-tests**: p-value < 0.05 marks statistical significance (same folds, so paired)
-- **Mean difference**: effect size with 95% CI, lets you assess practical significance even when p > 0.05
-
-**Interpretation:** A finding is "signal" only if both:
-1. It is practically significant (beats the comparison by a meaningful amount)
-2. It is statistically significant (p < 0.05) across folds (not just noise)
-
-## Common commands
+Expected output:
 
 ```bash
-uv run pytest tests/
-uv run ruff check .
-uv run python -m kvant.ml_prepare_data.prepare_experiment
+echo "$BEST_RESNET_RESULT"
 ```
 
-To prepare a fixed-threshold CUSUM ablation instead of the tuned bars/day sampler:
+## Step 14: Compare Conv1D Against ResNet-LSTM
+
+Run after `source artifacts/final_plan/selected_grid.env`.
 
 ```bash
-uv run python -m kvant.ml_prepare_data.prepare_experiment --sampler fixed_cusum --cusum-h 0.01
+uv run python scripts/compare_experiments.py \
+  --results-a "$BEST_GRID_RESULT" \
+  --results-b "$BEST_RESNET_RESULT" \
+  --name-a "$BEST_GRID_RUN" \
+  --name-b "$BEST_RESNET_RUN" \
+  --metrics \
+    test_accuracy \
+    test_f1_macro \
+    test_trade_signal_rate \
+    test_directional_acted_accuracy \
+    test_portfolio_total_return_pct \
+    test_portfolio_sharpe_ratio_annualized \
+    test_portfolio_max_drawdown_pct \
+  --wandb-project day-trading-experiments \
+  --wandb-name E3-conv1d-vs-resnet
 ```
 
-To set up the current CUSUM/barrier calibration grid, use the grid runner. It covers CUSUM thresholds
-`0.005`, `0.01`, `0.02`; barrier heights `0.005`, `0.01`, `0.015`; barrier widths `60`, `120`, `180`;
-and meta thresholds `0.45`, `0.50`, `0.55`, `0.60`.
+## Step 15: Run Confidence-Based Selective Trading Sweep
+
+This tests RQ3.
 
 ```bash
-# Write/print the full command plan without running it.
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid plan
-
-# Prepare missing fold manifests for the 27 data configurations.
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid prepare --execute
-
-# Run Conv1D first. Use --start-index/--max-runs to batch the 108 training commands.
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d --execute --max-runs 4
-
-# After selecting promising Conv1D configs, create and edit the ResNet-LSTM follow-up list.
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid write-promising-template
-uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-resnet --execute
+caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-confidence \
+  --execute \
+  --wandb-project day-trading-experiments \
+  --extra-train-arg=--seed \
+  --extra-train-arg 1337
 ```
 
-After preparing data, validate and train using the generated manifest:
+Expected outputs match:
 
 ```bash
-uv run python -m kvant.ml_framework.scripts.smoke_prepared_experiment --cv-manifest src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_cv_manifest.json
-uv run python -m kvant.ml_framework.scripts.train_experiment --baseline --epochs 3
+ls $BEST_CONFIDENCE_GLOB
 ```
 
-## Shared training configurations
+## Step 16: Run Meta-Selection Sweep
 
-Use these checked-in `invoke` presets when team members need directly comparable runs. Pass the same explicit
-`--cv-manifest` to every command for reproducibility:
+This tests RQ4.
 
 ```bash
-# One-epoch Conv1D startup check without return simulations or checkpoint output
-uv run invoke smoke --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
-
-# Conv1D baselines using the current zero-cost evaluation protocol
-uv run invoke baseline-no-cost --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
-uv run invoke baseline-cost --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
-
-# Main ResNet-LSTM candidates using the current zero-cost evaluation protocol
-uv run invoke main-no-cost --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
-uv run invoke main-cost --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json
+caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-meta \
+  --execute \
+  --wandb-project day-trading-experiments \
+  --extra-train-arg=--seed \
+  --extra-train-arg 1337
 ```
 
-The baseline presets use Conv1D for 30 epochs. The main presets use the current conservative ResNet-LSTM candidate for
-30 epochs. Both use `lr=0.001` with cosine annealing to `min_lr=0.00001`, fractional Kelly at `0.25`, a `2%`
-maximum position fraction, and full validation evaluation every 3 epochs. Early stopping is available as an opt-in
-override if you want a more paper-like training protocol, but it is off by default so full training curves remain
-comparable across runs. The legacy `*-cost` presets use
-`transaction_cost=0` for compatibility with the current final-run protocol. The ResNet-LSTM settings are shared candidate parameters, not
-claimed optimal parameters until validation experiments establish that.
-
-Add a deliberate one-off override with `--extra-args`, for example:
+Expected outputs match:
 
 ```bash
-uv run invoke main-cost \
-  --cv-manifest=src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json \
-  --extra-args="--seed 7 --wandb-name main-cost-seed7"
+ls $BEST_META_GLOB
 ```
 
-The default training scheduler is cosine annealing. Disable it only for an ablation:
+## Step 17: Generate Final Tables And Figures
+
+Run after all required experiments are complete. If optional `hist_gb`, ResNet, confidence, or meta runs were skipped,
+remove those corresponding lines.
 
 ```bash
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json \
-  --lr-scheduler none
+uv run python scripts/generate_experiment_report.py \
+  --result E0-majority=results/baselines/E0_majority.csv \
+  --result E0-random=results/baselines/E0_random.csv \
+  --result E0-logreg=results/baselines/E0_logreg.csv \
+  --result E0-random-forest=results/baselines/E0_random_forest.csv \
+  --result E0-buy-and-hold=results/baselines/E0_buy_and_hold.csv \
+  --result E1-timebar-conv1d-nometa=results/main/E1_timebar_conv1d_nometa.csv \
+  --result E2-timebar-density-matched-nextbar=results/main/E2_timebar_density_matched_nextbar.csv \
+  --result E2-timebar-density-matched-tb=results/main/E2_timebar_density_matched_tb.csv \
+  --result "$BEST_GRID_RUN=$BEST_GRID_RESULT" \
+  --result "$BEST_RESNET_RUN=$BEST_RESNET_RESULT" \
+  --results-glob "$BEST_CONFIDENCE_GLOB" \
+  --results-glob "$BEST_META_GLOB" \
+  --metric test_accuracy \
+  --metric test_f1_macro \
+  --metric test_trade_signal_rate \
+  --metric test_directional_acted_accuracy \
+  --metric test_portfolio_total_return_pct \
+  --metric test_portfolio_sharpe_ratio_annualized \
+  --metric test_portfolio_max_drawdown_pct \
+  --metric test_portfolio_n_executed_trades \
+  --metric test_pred_side_class_0_pct \
+  --metric test_pred_side_class_1_pct \
+  --comparison E1-timebar-conv1d-nometa="$BEST_GRID_RUN" \
+  --comparison E2-timebar-density-matched-nextbar="$BEST_GRID_RUN" \
+  --comparison E2-timebar-density-matched-tb="$BEST_GRID_RUN" \
+  --comparison "$BEST_GRID_RUN=$BEST_RESNET_RUN"
 ```
 
-Enable early stopping explicitly when you want it:
+Expected outputs:
+
+```text
+reports/generated/tables/summary_metrics.csv
+reports/generated/tables/summary_metrics.tex
+reports/generated/tables/pairwise_tests.csv
+reports/generated/tables/pairwise_tests.tex
+reports/generated/figures/*.png
+reports/generated/figures/*.pdf
+```
+
+## Step 18: Sync W&B Offline Runs
+
+Only run this if W&B was in offline mode.
 
 ```bash
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest src/kvant/ml_framework/prepared/<experiment>_cv_manifest.json \
-  --early-stopping-patience 5
+wandb sync wandb/offline-run-*
 ```
 
-For dropout, use a small successive-halving-style screen instead of Hyperband: run one fold for 5 epochs with
-`--model-dropout 0.1`, `0.3`, and `0.5`; keep the best validation `val/meta/f1`, then run that dropout on all folds
-for the final epoch budget. If the top two are effectively tied, prefer the larger dropout because these models have
-shown overfitting risk.
+## What Gets Logged
 
-For a local smoke run without cloud logging:
+Training logs classification, decision, and portfolio metrics. It also logs class distributions:
+
+```text
+{split}/distribution/true_side/class_0_pct
+{split}/distribution/true_side/class_1_pct
+{split}/distribution/pred_side/class_0_pct
+{split}/distribution/pred_side/class_1_pct
+{split}/distribution/trade_signal/class_0_pct
+{split}/distribution/trade_signal/class_1_pct
+{split}/distribution/trade_signal/class_2_pct
+```
+
+Use these to catch prediction collapse, for example a model predicting only one class.
+
+## Training Defaults
+
+The training CLI uses cosine learning-rate scheduling by default:
 
 ```bash
-WANDB_MODE=offline uv run python -m kvant.ml_framework.scripts.train_experiment --exp-dir src/kvant/ml_framework/prepared/sb_L_12_w180_h1.5_TBPD30_fold00 --epochs 1 --no-return-stats
+--lr-scheduler cosine
 ```
 
-On CUDA-enabled machines, keep the repo metadata generic and override PyTorch locally instead of committing a CUDA index to `pyproject.toml`. A one-off option is:
+Disable it only for an explicit ablation:
 
 ```bash
-uv sync --index pytorch=https://download.pytorch.org/whl/cu124
+--lr-scheduler none
 ```
 
-If you prefer a persistent machine-local override, put it in an ignored `uv.toml`.
-
-Portfolio metrics use a budget-constrained account simulator by default. The simulator applies the same next-sampled-bar entry convention as the backtest, sizes positions from meta bet size, charges entry and exit transaction costs, tracks cash/open positions/exposure, skips trades when budget limits are exhausted, and produces an equity curve. The defaults are `$10,000` initial cash, at most `2%` equity per trade, `100%` total exposure, and at most `10` concurrent positions. Override them with:
+Model dropout defaults to `0.3`. Early stopping is available but not enabled unless a command explicitly passes:
 
 ```bash
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --portfolio-initial-cash 10000 \
-  --portfolio-max-position-fraction 0.02 \
-  --portfolio-max-total-exposure 1.0 \
-  --portfolio-max-positions 10
+--early-stopping-patience 5
 ```
 
-## Logging and metrics
+## Report Outputs To Use
 
-W&B uses a compact metric set by default and runs the expensive full evaluation on epoch 1, every 3 epochs, and the
-final epoch. Normal epochs log training and validation loss. Full-evaluation epochs add the most informative
-validation classification, meta-label, decision, execution, and portfolio metrics. Test metrics, reduced paper-trading
-diagnostics, confusion matrices, per-ticker results, and equity/profit curves are produced only for the final best model.
+| Output | File |
+| --- | --- |
+| Dataset/sample count table | `reports/generated/tables/dataset_summary.tex` |
+| Main metric table | `reports/generated/tables/summary_metrics.tex` |
+| Pairwise statistical tests | `reports/generated/tables/pairwise_tests.tex` |
+| Sample count figure | `reports/generated/figures/sample_count_comparison.pdf` |
+| Grid heatmap | `reports/generated/figures/grid_heatmap_val_f1_macro.pdf` |
+| Metric comparison figures | `reports/generated/figures/*.pdf` |
 
-Use `--full-eval-every N` to change the evaluation interval.
+## Interpretation Rules
 
-Metrics are grouped by pipeline layer:
-
-- `training/*`: optimization and validation loss.
-- `classification/*`: primary side-model accuracy and macro F1 before meta filtering.
-- `meta/*`: TAKE/PASS precision, recall, F1, and take rate.
-- `decision/*`: trade rate, acted directional accuracy, and false actions on EXIT truths.
-- `execution/*`: raw trade-signal counts before simulation constraints.
-- `paper/*`: reduced final-best-model trade diagnostics compatible with the reference-style backtest.
-- `portfolio/*`: budget-constrained return, summed calendar-year profit, drawdown, Sharpe, exposure, trade counts, and costs.
-
-Portfolio curves are logged as `perf/portfolio_equity_curve/{split}` and `charts/portfolio_equity/{split}`. Use `portfolio/*` for final economic claims and keep `paper/*` as a diagnostic comparison.
-
-## Notes
-
-The preferred prepared artifacts are the non-`droptexit` `event_outcome` folds, for example `sb_L_12_w180_h1.5_TBPD30_fold00` through `fold04`. Older `droptexit` artifacts are retained on disk for comparison, but the current training entrypoint expects raw three-class event-outcome artifacts and derives side/meta labels downstream.
-
-Newly generated prepared data, W&B runs, checkpoints, caches, generated plots, and generated architecture docs are intentionally ignored. A few reference prepared manifests/folds remain checked in, and everything else can be regenerated from the source code and commands above.
+1. Choose CUSUM/TB parameters using validation metrics only.
+2. Use test metrics only for final reporting.
+3. Treat a result as meaningful only if it is both practically relevant and statistically supported across folds.
+4. Use classification metrics for model quality.
+5. Use decision metrics for accepted-signal quality.
+6. Use portfolio metrics for economic outcome.
 
 This is a research codebase, not a live trading system or investment recommendation.

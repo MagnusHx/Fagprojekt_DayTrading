@@ -1,172 +1,178 @@
-# 8-Day Experiment Plan (2026-06-12 → 2026-06-19)
+# Final Experiment Plan
 
-Goal: produce a defensible report that answers the four research questions through a
-**ladder of comparisons**, starting from trivially simple baselines and adding one piece of
-complexity at a time. Every experiment below exists to fill one specific table or figure in
-the report.
+This document mirrors the runnable workflow in `README.md`. The goal is to keep the report logic, code outputs, and
+W&B runs aligned.
 
-## Where we stand (so the plan makes sense)
+## Research Questions
 
-From the latest directional-only W&B run (epoch 33, 1 fold):
+| RQ | Question | Main experiments |
+| --- | --- | --- |
+| RQ1 | How does a reference-inspired machine learning trading pipeline perform on intraday U.S. equities? | Simple baselines, buy-and-hold, timebar Conv1D, final best model |
+| RQ2 | Does CUSUM sampling with triple-barrier labelling improve predictive and economic performance compared with a time-based baseline? | Timebar Conv1D vs fixed-CUSUM/TB Conv1D grid |
+| RQ3 | Does confidence-based selective trading improve the quality and risk-adjusted performance of executed trades? | Primary confidence threshold sweep |
+| RQ4 | Does a learned meta-selection model improve trade selection beyond the primary model's own confidence? | No-meta vs meta-selection sweep |
 
-| Metric | Value | Meaning |
-| --- | ---: | --- |
-| test classification accuracy | 0.495 | Primary side model is at **chance** |
-| test f1_macro | 0.495 | Same |
-| test meta F1 | 0.413 | Meta layer cannot help a chance-level primary model |
-| trade_signal_rate | 0.366 | Meta takes ~37% of signals |
-| economic metrics | missing | Run used `--no-return-stats`; no `paper/*`/`portfolio/*` logged |
+## Fixed Setup
 
-Consequences:
+| Parameter | Value |
+| --- | --- |
+| Ticker universe size | 20 |
+| Ticker selection | Top dollar volume, train only |
+| Walk-forward folds | 5 |
+| Train/validation/test | 1 year / 1 quarter / 1 quarter |
+| Sequence length | 12 |
+| Time bars | 15 minutes |
+| CUSUM thresholds | 1%, 2%, 3% |
+| Triple-barrier heights | 1%, 2%, 4%, 6% |
+| Vertical barrier width | 240 minutes |
+| Transaction cost | 0.001 |
+| Random seed | 1337 |
 
-1. We will probably **not** find a profitable strategy in 8 days. That is fine. The research
-   questions are *comparative* ("does X improve over Y?"), and a clean null result answers
-   them. The report dies only if the comparisons are missing or unfair.
-2. The single most important missing piece is the **RQ1 baseline pipeline**
-   (fixed time bars + next-bar direction labels). It is not implemented — only
-   `tuned_cusum`/`fixed_cusum` samplers and triple-barrier labels exist. Without it, RQ1
-   cannot be answered at all. This is build item #1.
-3. Final runs must drop `--no-return-stats` and run **all 5 walk-forward folds**, otherwise
-   we have no CAGR/Sharpe/drawdown numbers and no error bars for the report.
+All parameters not being tested are frozen.
 
-## The experiment ladder
+## Experiment Stages
 
-Each level adds exactly one piece of complexity. A level's result is interpreted **relative
-to the level below it** — that is how we "explain our results by comparing between simple
-baseline models".
+### E0: Simple Baselines
 
-```
-L0  Majority class + logistic regression        (floor: is DL doing anything?)
-L1  Time bars + next-bar direction + Conv1D     (RQ1 baseline arm)
-L2  CUSUM bars + triple-barrier + Conv1D        (RQ1 advanced arm; needs label calibration)
-L3  Same as L2 with ResNet-LSTM                 (model complexity, only if L2 > L0)
-L4  + confidence thresholds                     (RQ3)
-L5  + meta-selection on/off + meta features     (RQ4)
-```
+Purpose: establish whether simple non-neural models already solve the primary side-prediction task.
 
-## Build items (code we must write first)
+Runs:
 
-| # | Item | Why | Est. effort |
+| Run | Model | Output |
+| --- | --- | --- |
+| `E0-majority` | Majority classifier | `results/baselines/E0_majority.csv` |
+| `E0-random` | Stratified random classifier | `results/baselines/E0_random.csv` |
+| `E0-logreg` | Logistic regression | `results/baselines/E0_logreg.csv` |
+| `E0-random-forest` | Random forest | `results/baselines/E0_random_forest.csv` |
+| `E0-hist-gb` | Histogram gradient boosting, optional | `results/baselines/E0_hist_gb.csv` |
+
+### E0b: Buy-And-Hold Baseline
+
+Purpose: provide an economic benchmark independent of classification.
+
+Output: `results/baselines/E0_buy_and_hold.csv`.
+
+### E1: Time-Based Conv1D Baseline
+
+Purpose: establish the simplest neural trading pipeline.
+
+Configuration:
+
+| Sampler | Label | Model | Meta |
 | --- | --- | --- | --- |
-| B1 | `TimeBarSampler` (aggregate minute data to k-minute bars, e.g. `--sampler time_bar --time-bar-minutes 15`) | RQ1 baseline arm. 15-min bars ≈ 26 bars/day, comparable density to CUSUM target 30/day → fair comparison | ~half day |
-| B2 | `NextBarDirectionLabeler` (`--labeler next_bar`): label = sign of next-bar return, entry at next bar open (reuse the live-safe entry convention) | RQ1 baseline arm | ~half day (with B1) |
-| B3 | `scripts/simple_baselines.py`: majority-class + `LogisticRegression` on flattened prepared windows, evaluated with the **same** evaluator/metrics | L0 floor for every table | ~half day |
-| B4 | `--no-meta` mode in `train_experiment.py`: act on every primary signal with fixed bet size (no TAKE/PASS, no Kelly) | RQ4 needs a true no-meta arm. `--meta-accept-threshold 0.0` approximates it but still Kelly-sizes bets | small |
-| B5 | Threshold sweep at eval time: evaluate the saved meta probabilities at thresholds {0.0, 0.55, 0.65} in one run (extend evaluator or a small script on the best-checkpoint bundle via `reconcile_metrics.py` plumbing) | RQ3 without retraining 3× | small |
+| 15-minute time bars | Next-bar direction | Conv1D | OFF |
 
-Notes for B1/B2: feature engineering already runs on minute data *before* sampling, so the
-same `IntradayTA10Features` + scaler + selector work unchanged for time bars — that keeps
-the RQ1 comparison "same features, same model, only bars+labels differ", which is exactly
-what the research question specifies.
+Output: `results/main/E1_timebar_conv1d_nometa.csv`.
 
-## Experiments
+### E2: Fixed CUSUM/Triple-Barrier Grid
 
-All runs: same seed (1337), same lookback (12), Conv1D defaults unless stated, transaction
-cost 0 for economic metrics,
-**no** `--no-return-stats` on final runs, all 5 folds for final runs (single fold OK for
-screening). Log to W&B with the run names below.
+Purpose: test information-driven sampling and triple-barrier labels without changing model architecture.
 
-### E0 — Floors (L0) — feeds Report Table 1
+Configuration:
 
-| Run | What | Command sketch |
-| --- | --- | --- |
-| `E0-majority` | Majority class per split, from class-balance tables | `simple_baselines.py --model majority` |
-| `E0-logreg` | Logistic regression on flattened windows | `simple_baselines.py --model logreg` |
-
-Record: accuracy, f1_macro per split. Interpretation rule for the report: *any DL result is
-only "signal" if it beats E0-logreg out of sample.*
-
-### E1 — RQ1 head-to-head (L1 vs L2) — feeds Report Table 2 + equity-curve Figure
-
-Same model (Conv1D), same features, same folds. Only bars + labels differ.
-
-| Run | Sampler | Labels |
-| --- | --- | --- |
-| `E1-timebar` | time_bar 15 min | next-bar direction |
-| `E1-cusum` | tuned CUSUM, 30 bars/day | triple-barrier (hb=2.0%, W=240 min) |
-
-Prepare each, then:
-
-```bash
-uv run python -m kvant.ml_framework.scripts.train_experiment \
-  --cv-manifest <manifest> --model conv1d --epochs 20 \
-  --wandb-name E1-timebar   # / E1-cusum
-```
-
-Record: accuracy, f1_macro, and `portfolio/*`: CAGR (annual net P/L), Sharpe, cumulative
-return, max drawdown. This is the direct RQ1/RQ2 answer.
-
-### E2 — Model complexity (L3) — feeds Report Table 4
-
-Same CUSUM + triple-barrier config (hb=2.0%, W=240 min), all 5 folds:
-
-| Run | Model |
-| --- | --- |
-| `E2-conv1d` | conv1d, 20 epochs |
-| `E2-resnet` | resnet_lstm, 30 epochs |
-
-Gate: if `E2-conv1d` does not beat `E0-logreg` on validation f1_macro, run `E2-resnet`
-once anyway (cheap, completes the table) but do **not** spend time tuning it — the earlier
-ResNet run already showed overfitting (val meta F1 0.09).
-
-### E3 — Selective trading / confidence thresholds (RQ3) — feeds Report Table 5 + frequency-vs-Sharpe Figure
-
-On the best E2 model, **no retraining** (decision layer only, via B5):
-
-| Arm | Threshold |
-| --- | --- |
-| no threshold | 0.0 (trade every signal) |
-| medium | 0.55 |
-| high | 0.65 |
-
-Record per arm: n_trades, trade_signal_rate, hit rate, avg net return/trade, Sharpe, max
-drawdown. The report analyzes the frequency / hit-rate / risk-adjusted-return trade-off —
-even with a weak model the *shape* of this trade-off answers RQ3.
-
-### E4 — Meta-selection ablation (RQ4) — feeds Report Table 6
-
-On the best E2 config, all 5 folds:
-
-| Run | Decision layer |
-| --- | --- |
-| `E4-nometa` | `--no-meta`: every primary signal, fixed size (B4) |
-| `E4-meta-min` | meta with `--meta-features proba,embedding` |
-| `E4-meta-full` | meta with full default feature set |
-
-Incremental value of meta-selection = E4-meta-* vs E4-nometa on portfolio metrics.
-Feature sensitivity = E4-meta-min vs E4-meta-full. That is RQ4 answered.
-
-## Day-by-day schedule
-
-| Day | Date | Work | Gate at end of day |
+| Sampler | Label | Model | Meta |
 | --- | --- | --- | --- |
-| 1 | Fri 12 Jun | B1+B2 (time-bar sampler + next-bar labeler, with tests). Prepare E1 manifests. | `prepare_experiment --sampler time_bar --labeler next_bar` produces valid manifest |
-| 2 | Sat 13 Jun | B3 (simple baselines) → run E0. B4 (`--no-meta`). Prepare E1-cusum and E2 manifests. | Table 1 (E0) numbers exist |
-| 3 | Sun 14 Jun | Run `E1-timebar` (all 5 folds, full return stats). | Table 2a (E1-timebar) exists |
-| 4 | Mon 15 Jun | Run `E1-cusum` and `E2-conv1d` (same manifest, all 5 folds, full return stats). | Table 2b (E1-cusum) + Table 4a (E2-conv1d) + equity curves exist |
-| 5 | Tue 16 Jun | E2-resnet (if E2-conv1d beats E0-logreg). B5 (threshold sweep) → E3. | Table 4b (E2-resnet, optional) + Table 5 (E3) exist |
-| 6 | Wed 17 Jun | Run E4 (all 3 arms, all 5 folds). Assemble all tables/figures, per-fold mean ± std. | Table 6 (E4) exists |
-| 7 | Thu 18 Jun | Buffer for reruns/failures. Write results & discussion sections from the tables. | Draft results chapter |
-| 8 | Fri 19 Jun | Polish report, sanity-check every number against W&B, archive run IDs in `reports/`. | Done |
+| Fixed CUSUM | Triple barrier | Conv1D | OFF |
 
-**Buffer policy:** if a build item slips, cut from the bottom: E2-resnet first, then
-E4-meta-full. Never cut E0, E1, or E3 — they carry RQ1–RQ3.
+Grid:
 
-## Report mapping (so nothing is orphaned)
-
-| Research question | Experiments | Deliverable |
+| CUSUM h | TB height | W |
 | --- | --- | --- |
-| RQ1: do information-driven bars + triple-barrier beat time bars + next-bar direction? | E0, E1 | Tables 1–2, equity-curve figure |
-| RQ2: predictive + economic comparison | E1, E2 | Tables 2, 4 (acc/F1 + CAGR/Sharpe/cum-return/MDD) |
-| RQ3: does selective trading improve risk-adjusted returns? | E3 | Table 5, frequency-vs-Sharpe figure |
-| RQ4: incremental value of meta-selection + sensitivity? | E4 | Table 6 |
+| 1%, 2%, 3% | 1%, 2%, 4%, 6% | 240 minutes |
 
-## Standing rules for every final run
+The best configuration is selected using validation metrics only.
 
-1. All 5 walk-forward folds; report mean ± std + **95% confidence intervals** across folds.
-2. No `--no-return-stats` — we need `portfolio/*` for every economic claim.
-3. Use `portfolio/*` (strict simulator) for conclusions; `paper/*` is diagnostic only.
-4. Fixed seed, identical features/lookback across compared arms; one variable changes at a time.
-5. Tune thresholds on validation, report on test.
-6. Every table cell in the report carries a W&B run name from this file.
-7. **Statistical significance:** For every comparison (E1 vs E0, E2 vs E1, etc.), report p-value from paired t-test. A difference is "signal" only if both practically significant AND statistically significant (p < 0.05).
+Implementation:
+
+| Task | Script |
+| --- | --- |
+| Train/prepare fixed grid | `python -m kvant.ml_framework.scripts.run_experiment_grid` |
+| Select best grid config | `scripts/select_best_grid_config.py` |
+| Save selected config for later steps | `artifacts/final_plan/selected_grid.json` and `artifacts/final_plan/selected_grid.env` |
+| Save selected config for ResNet/meta follow-ups | `reports/promising_grid_configs.json` |
+
+### E2b: Density-Matched Time-Bar Control
+
+Purpose: check whether the CUSUM/TB result is caused by the event definition or simply by a different number of
+training samples.
+
+The control computes the average usable samples per ticker-day from the selected CUSUM/TB manifest using the training
+split only. It then prepares a time-bar baseline with the nearest integer interval that matches this average sample
+density.
+
+Recommended controls:
+
+| Control | Label | Purpose |
+| --- | --- | --- |
+| Density-matched timebar | Next-bar direction | Fairer version of the original timebar baseline |
+| Density-matched timebar | Same triple-barrier settings as best CUSUM/TB | Cleaner sampling-only ablation |
+
+### E3: Model Architecture
+
+Purpose: test whether model complexity improves the selected CUSUM/TB setup.
+
+Comparison:
+
+| Model A | Model B | Data | Meta |
+| --- | --- | --- | --- |
+| Conv1D | ResNet-LSTM | Best CUSUM/TB config | OFF |
+
+### E4: Confidence-Based Selective Trading
+
+Purpose: test whether accepting only high-confidence primary predictions improves decision and portfolio metrics.
+
+Threshold sweep:
+
+| Thresholds |
+| --- |
+| 0.45, 0.50, 0.55, 0.60 |
+
+### E5: Meta-Selection
+
+Purpose: test whether a learned meta-model improves accepted-signal quality beyond primary confidence.
+
+Comparison:
+
+| Run | Selection |
+| --- | --- |
+| No meta | Accept primary signals directly |
+| Meta | Logistic meta-model decides TAKE/PASS |
+
+### E6: Time-Period Robustness
+
+Purpose: if time allows, repeat the best setup on another market period.
+
+## Tables And Figures
+
+| Output | Produced by | Purpose |
+| --- | --- | --- |
+| Dataset summary table | `scripts/summarize_prepared_manifests.py` | Show sample counts across timebar/CUSUM setups |
+| Baseline table | `scripts/generate_experiment_report.py` | Compare simple baselines and neural runs |
+| Grid heatmap | `scripts/generate_experiment_report.py` | Show validation performance over CUSUM/TB grid |
+| Main comparison table | `scripts/generate_experiment_report.py` | Report mean and 95% CI across folds |
+| Pairwise tests | `scripts/generate_experiment_report.py` or `scripts/compare_experiments.py` | Report p-values and mean differences |
+| Class distributions | W&B + result CSVs | Check label balance and prediction collapse |
+
+## Priority
+
+Must-have:
+
+1. Fixed RQs.
+2. README command flow.
+3. Timebar Conv1D.
+4. Fixed CUSUM/TB grid.
+5. Simple baselines.
+6. Buy-and-hold.
+7. Summary tables and figures.
+8. Pairwise statistics.
+
+Should-have:
+
+1. ResNet-LSTM on selected config.
+2. Confidence threshold sweep.
+3. Meta-selection sweep.
+
+Nice-to-have:
+
+1. Time-period robustness.
+2. Kelly and richer sizing analysis.

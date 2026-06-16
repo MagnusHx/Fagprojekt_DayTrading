@@ -12,9 +12,7 @@ Usage:
 """
 
 import argparse
-import json
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -24,7 +22,8 @@ import wandb
 
 from kvant.ml_prepare_data.data_loading import PreparedExperiment
 from kvant.ml_framework.train import ExperimentEvaluator, EvalConfig
-from kvant.ml_framework.utils.statistical_tests import calculate_ci, format_ci
+from kvant.ml_framework.utils.statistical_tests import calculate_ci
+from kvant.ml_framework.wandb_defaults import DEFAULT_WANDB_ENTITY, DEFAULT_WANDB_PROJECT, wandb_init_kwargs
 
 
 def _plot_threshold_tradeoff(results: dict) -> plt.Figure:
@@ -81,7 +80,7 @@ def evaluate_checkpoint_at_thresholds(
     checkpoint_path: Path,
     thresholds: list[float],
     wandb_name: str,
-    wandb_project: str = "day-trading-experiments",
+    wandb_project: str = DEFAULT_WANDB_PROJECT,
 ) -> dict:
     """
     Evaluate a checkpoint at different meta-acceptance thresholds.
@@ -145,8 +144,14 @@ def main():
     parser.add_argument(
         "--wandb-project",
         type=str,
-        default="day-trading-experiments",
+        default=DEFAULT_WANDB_PROJECT,
         help="W&B project name.",
+    )
+    parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=DEFAULT_WANDB_ENTITY,
+        help="W&B entity/team name.",
     )
     parser.add_argument(
         "--wandb-name",
@@ -164,12 +169,15 @@ def main():
 
     # Initialize W&B
     wandb.init(
-        project=args.wandb_project,
-        name=args.wandb_name,
-        config={
-            "checkpoint": str(args.checkpoint),
-            "thresholds": args.thresholds,
-        },
+        **wandb_init_kwargs(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=args.wandb_name,
+            config={
+                "checkpoint": str(args.checkpoint),
+                "thresholds": args.thresholds,
+            },
+        ),
     )
 
     # Evaluate at all thresholds
@@ -222,7 +230,6 @@ def main():
 
     # Save results to CSV if requested
     if args.output:
-        import pandas as pd
         df_list = []
         for threshold_key, fold_results in results.items():
             threshold = float(threshold_key.split("_")[-1])

@@ -1,31 +1,32 @@
 #!/usr/bin/env python3
-"""
-Simple baseline models: majority class and logistic regression.
-
-These serve as E0 (floor) for validating that deep learning models beat trivial baselines.
+"""Simple scikit-learn baseline models for prepared walk-forward folds.
 
 Usage:
     uv run python scripts/simple_baselines.py \\
       --model majority \\
-      --prepared-data-dir src/kvant/ml_framework/prepared \\
       --cv-manifest <path-to-cv-manifest.json> \\
       --wandb-name E0-majority
 """
 
-import argparse
+from __future__ import annotations
+
 import json
+import argparse
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.base import BaseEstimator
+from sklearn.dummy import DummyClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 import wandb
 
 from kvant.ml_prepare_data.data_loading import PreparedExperiment
-from kvant.ml_framework.utils.statistical_tests import calculate_ci, format_ci
+from kvant.ml_framework.utils.statistical_tests import calculate_ci
+from kvant.ml_framework.wandb_defaults import DEFAULT_WANDB_ENTITY, DEFAULT_WANDB_PROJECT, wandb_init_kwargs
 
 
 def load_cv_manifest(manifest_path: Path) -> dict:
@@ -50,115 +51,141 @@ def _plot_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, split: str, t
     # Add text annotations
     for i in range(2):
         for j in range(2):
-            text = ax.text(j, i, cm[i, j], ha="center", va="center", color="white" if cm[i, j] > cm.max() / 2 else "black")
+            ax.text(
+                j,
+                i,
+                cm[i, j],
+                ha="center",
+                va="center",
+                color="white" if cm[i, j] > cm.max() / 2 else "black",
+            )
 
     plt.colorbar(im, ax=ax)
     return fig
 
 
-def run_majority_class_baseline(experiment: PreparedExperiment) -> dict:
-    """
-    Majority class baseline: always predict the most common class.
-    """
-    results = {}
-
-    for fold_idx, (train_set, val_set, test_set) in enumerate(
-        zip(experiment.train_folds, experiment.val_folds, experiment.test_folds)
-    ):
-        train_labels = np.array([int(experiment._labels_primary[i]) for i in train_set])
-        val_labels = np.array([int(experiment._labels_primary[i]) for i in val_set])
-        test_labels = np.array([int(experiment._labels_primary[i]) for i in test_set])
-
-        # Majority class is the most common class in training
-        unique, counts = np.unique(train_labels, return_counts=True)
-        majority_class = unique[np.argmax(counts)]
-
-        # Predict majority class for all examples
-        train_preds = np.full_like(train_labels, majority_class)
-        val_preds = np.full_like(val_labels, majority_class)
-        test_preds = np.full_like(test_labels, majority_class)
-
-        # Evaluate
-        fold_result = {
-            "fold": fold_idx,
-            "train_accuracy": float(accuracy_score(train_labels, train_preds)),
-            "train_f1_macro": float(f1_score(train_labels, train_preds, average="macro", zero_division=0)),
-            "val_accuracy": float(accuracy_score(val_labels, val_preds)),
-            "val_f1_macro": float(f1_score(val_labels, val_preds, average="macro", zero_division=0)),
-            "test_accuracy": float(accuracy_score(test_labels, test_preds)),
-            "test_f1_macro": float(f1_score(test_labels, test_preds, average="macro", zero_division=0)),
-        }
-
-        # Log confusion matrices to W&B
-        fig_test = _plot_confusion_matrix(test_labels, test_preds, "test", f"Majority class - Fold {fold_idx} - Test")
-        wandb.log({f"confusion_matrix/test_fold_{fold_idx}": wandb.Image(fig_test)})
-        plt.close(fig_test)
-
-        results[f"fold_{fold_idx}"] = fold_result
-
-    return results
+def _make_estimator(model: str, seed: int) -> BaseEstimator:
+    """Create a scikit-learn estimator for a named baseline model."""
+    if model == "majority":
+        return DummyClassifier(strategy="most_frequent")
+    if model == "random":
+        return DummyClassifier(strategy="stratified", random_state=seed)
+    if model == "logreg":
+        return LogisticRegression(max_iter=1000, random_state=seed, n_jobs=-1)
+    if model == "random_forest":
+        return RandomForestClassifier(
+            n_estimators=200,
+            max_depth=8,
+            min_samples_leaf=50,
+            random_state=seed,
+            n_jobs=-1,
+            class_weight="balanced_subsample",
+        )
+    if model == "hist_gb":
+        return HistGradientBoostingClassifier(
+            max_iter=200,
+            learning_rate=0.05,
+            max_leaf_nodes=31,
+            l2_regularization=0.01,
+            random_state=seed,
+        )
+    raise ValueError(f"Unknown baseline model: {model}")
 
 
-def run_logistic_regression_baseline(experiment: PreparedExperiment) -> dict:
-    """
-    Logistic regression baseline: train on flattened feature windows.
-    """
-    results = {}
+def _flatten_split(experiment: PreparedExperiment, index: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Load flattened window features and primary side labels for one split."""
+    features = []
+    labels = []
+    for tid, tpos in np.asarray(index, dtype=np.int64):
+        x_window, _event_label = experiment.store.window_and_label(int(tid), int(tpos), experiment.L)
+        features.append(x_window)
+        labels.append(experiment.store.side_label(int(tid), int(tpos)))
+    features = np.asarray(features, dtype=np.float32)
+    labels = np.asarray(labels, dtype=np.int64)
+    return features.reshape(features.shape[0], -1), labels
 
-    for fold_idx, (train_set, val_set, test_set) in enumerate(
-        zip(experiment.train_folds, experiment.val_folds, experiment.test_folds)
-    ):
-        # Load features and labels
-        train_features = np.array([experiment.features[i] for i in train_set])
-        val_features = np.array([experiment.features[i] for i in val_set])
-        test_features = np.array([experiment.features[i] for i in test_set])
 
-        train_labels = np.array([int(experiment._labels_primary[i]) for i in train_set])
-        val_labels = np.array([int(experiment._labels_primary[i]) for i in val_set])
-        test_labels = np.array([int(experiment._labels_primary[i]) for i in test_set])
+def _score_split(y_true: np.ndarray, y_pred: np.ndarray, prefix: str) -> dict[str, float]:
+    """Compute classification metrics for a split."""
+    out = {
+        f"{prefix}_accuracy": float(accuracy_score(y_true, y_pred)),
+        f"{prefix}_f1_macro": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+        f"{prefix}_precision_macro": float(precision_score(y_true, y_pred, average="macro", zero_division=0)),
+        f"{prefix}_recall_macro": float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
+    }
+    n = int(len(y_true))
+    for label in (0, 1):
+        true_count = int(np.sum(y_true == label))
+        pred_count = int(np.sum(y_pred == label))
+        out[f"{prefix}_true_side_class_{label}_count"] = true_count
+        out[f"{prefix}_true_side_class_{label}_pct"] = float(true_count / n) if n else 0.0
+        out[f"{prefix}_pred_side_class_{label}_count"] = pred_count
+        out[f"{prefix}_pred_side_class_{label}_pct"] = float(pred_count / n) if n else 0.0
+    return out
 
-        # Flatten feature windows (L, F) -> (L*F,)
-        train_flat = train_features.reshape(train_features.shape[0], -1)
-        val_flat = val_features.reshape(val_features.shape[0], -1)
-        test_flat = test_features.reshape(test_features.shape[0], -1)
 
-        # Train logistic regression
-        clf = LogisticRegression(max_iter=1000, random_state=1337, n_jobs=-1)
+def run_sklearn_baseline(manifest: dict, *, model: str, seed: int) -> list[dict[str, float | int | str]]:
+    """Run a scikit-learn baseline across all prepared walk-forward folds."""
+    results: list[dict[str, float | int | str]] = []
+
+    for fold in manifest["folds"]:
+        fold_idx = int(fold["fold_idx"])
+        experiment = PreparedExperiment(Path(fold["exp_dir"]))
+
+        train_flat, train_labels = _flatten_split(experiment, experiment.index_train)
+        val_flat, val_labels = _flatten_split(experiment, experiment.index_val)
+        test_flat, test_labels = _flatten_split(experiment, experiment.index_test)
+
+        clf = _make_estimator(model, seed)
         clf.fit(train_flat, train_labels)
 
-        # Predict
         train_preds = clf.predict(train_flat)
         val_preds = clf.predict(val_flat)
         test_preds = clf.predict(test_flat)
 
-        # Evaluate
         fold_result = {
             "fold": fold_idx,
-            "train_accuracy": float(accuracy_score(train_labels, train_preds)),
-            "train_f1_macro": float(f1_score(train_labels, train_preds, average="macro", zero_division=0)),
-            "val_accuracy": float(accuracy_score(val_labels, val_preds)),
-            "val_f1_macro": float(f1_score(val_labels, val_preds, average="macro", zero_division=0)),
-            "test_accuracy": float(accuracy_score(test_labels, test_preds)),
-            "test_f1_macro": float(f1_score(test_labels, test_preds, average="macro", zero_division=0)),
+            "exp_dir": str(fold["exp_dir"]),
+            **_score_split(train_labels, train_preds, "train"),
+            **_score_split(val_labels, val_preds, "val"),
+            **_score_split(test_labels, test_preds, "test"),
         }
 
-        # Log confusion matrices to W&B
-        fig_test = _plot_confusion_matrix(test_labels, test_preds, "test", f"Logistic Regression - Fold {fold_idx} - Test")
+        fig_test = _plot_confusion_matrix(
+            test_labels, test_preds, "test", f"{model} baseline - Fold {fold_idx} - Test"
+        )
         wandb.log({f"confusion_matrix/test_fold_{fold_idx}": wandb.Image(fig_test)})
         plt.close(fig_test)
 
-        results[f"fold_{fold_idx}"] = fold_result
+        wandb.log({
+            f"fold{fold_idx:02d}/test/accuracy": fold_result["test_accuracy"],
+            f"fold{fold_idx:02d}/test/f1_macro": fold_result["test_f1_macro"],
+            f"fold{fold_idx:02d}/test/distribution/pred_side/class_0_pct": fold_result[
+                "test_pred_side_class_0_pct"
+            ],
+            f"fold{fold_idx:02d}/test/distribution/pred_side/class_1_pct": fold_result[
+                "test_pred_side_class_1_pct"
+            ],
+            f"fold{fold_idx:02d}/test/distribution/true_side/class_0_pct": fold_result[
+                "test_true_side_class_0_pct"
+            ],
+            f"fold{fold_idx:02d}/test/distribution/true_side/class_1_pct": fold_result[
+                "test_true_side_class_1_pct"
+            ],
+        })
+        results.append(fold_result)
 
     return results
 
 
 def main():
+    """Run the requested scikit-learn baseline and save fold-level metrics."""
     parser = argparse.ArgumentParser(
-        description="Run simple baseline models (majority class, logistic regression)."
+        description="Run simple scikit-learn baseline models on prepared CV artifacts."
     )
     parser.add_argument(
         "--model",
-        choices=["majority", "logreg"],
+        choices=["majority", "random", "logreg", "random_forest", "hist_gb"],
         required=True,
         help="Which baseline model to run.",
     )
@@ -171,8 +198,14 @@ def main():
     parser.add_argument(
         "--wandb-project",
         type=str,
-        default="day-trading-experiments",
+        default=DEFAULT_WANDB_PROJECT,
         help="W&B project name.",
+    )
+    parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=DEFAULT_WANDB_ENTITY,
+        help="W&B entity/team name.",
     )
     parser.add_argument(
         "--wandb-name",
@@ -186,42 +219,57 @@ def main():
         default=None,
         help="Optional CSV output file for results.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=1337,
+        help="Random seed for stochastic scikit-learn baselines.",
+    )
     args = parser.parse_args()
 
     # Initialize W&B
     wandb.init(
-        project=args.wandb_project,
-        name=args.wandb_name,
-        config={
-            "model": args.model,
-            "cv_manifest": str(args.cv_manifest),
-        },
+        **wandb_init_kwargs(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=args.wandb_name,
+            config={
+                "model": args.model,
+                "cv_manifest": str(args.cv_manifest),
+                "seed": int(args.seed),
+            },
+        ),
     )
 
-    # Load prepared experiment
     manifest = load_cv_manifest(args.cv_manifest)
-    exp_dirs = [fold["exp_dir"] for fold in manifest["folds"]]
-    experiment = PreparedExperiment.load_cv(*exp_dirs)
-
-    # Run baseline
-    if args.model == "majority":
-        results = run_majority_class_baseline(experiment)
-    else:  # logreg
-        results = run_logistic_regression_baseline(experiment)
-
-    # Compute fold statistics
-    folds_data = []
-    for fold_key, fold_result in results.items():
-        folds_data.append(fold_result)
+    folds_data = run_sklearn_baseline(manifest, model=args.model, seed=int(args.seed))
 
     # Aggregate across folds: mean ± std
     metrics_to_agg = [
         "train_accuracy",
         "train_f1_macro",
+        "train_precision_macro",
+        "train_recall_macro",
+        "train_true_side_class_0_pct",
+        "train_true_side_class_1_pct",
+        "train_pred_side_class_0_pct",
+        "train_pred_side_class_1_pct",
         "val_accuracy",
         "val_f1_macro",
+        "val_precision_macro",
+        "val_recall_macro",
+        "val_true_side_class_0_pct",
+        "val_true_side_class_1_pct",
+        "val_pred_side_class_0_pct",
+        "val_pred_side_class_1_pct",
         "test_accuracy",
         "test_f1_macro",
+        "test_precision_macro",
+        "test_recall_macro",
+        "test_true_side_class_0_pct",
+        "test_true_side_class_1_pct",
+        "test_pred_side_class_0_pct",
+        "test_pred_side_class_1_pct",
     ]
 
     for metric in metrics_to_agg:
@@ -242,6 +290,7 @@ def main():
 
     # Save to CSV if requested
     if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         df = pd.DataFrame(folds_data)
         df.to_csv(args.output, index=False)
         print(f"\nResults saved to {args.output}")

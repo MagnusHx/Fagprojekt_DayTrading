@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 import wandb
 
+from kvant.ml_framework.wandb_defaults import DEFAULT_WANDB_ENTITY, DEFAULT_WANDB_PROJECT, wandb_init_kwargs
 from kvant.ml_framework.utils.statistical_tests import (
     paired_ttest,
     format_ttest_result,
@@ -46,6 +47,7 @@ def compare_metrics(
     name_b: str,
     wandb_project: Optional[str] = None,
     wandb_name: Optional[str] = None,
+    wandb_entity: Optional[str] = None,
 ) -> dict:
     """
     Compare two sets of results with paired t-tests.
@@ -65,13 +67,16 @@ def compare_metrics(
     # Initialize W&B if specified
     if wandb_project and wandb_name:
         wandb.init(
-            project=wandb_project,
-            name=wandb_name,
-            config={
-                "model_a": name_a,
-                "model_b": name_b,
-                "metrics": metrics,
-            },
+            **wandb_init_kwargs(
+                project=wandb_project,
+                entity=wandb_entity,
+                name=wandb_name,
+                config={
+                    "model_a": name_a,
+                    "model_b": name_b,
+                    "metrics": metrics,
+                },
+            )
         )
 
     results = {}
@@ -171,8 +176,14 @@ def main():
     parser.add_argument(
         "--wandb-project",
         type=str,
-        default=None,
+        default=DEFAULT_WANDB_PROJECT,
         help="Optional W&B project for logging comparison results",
+    )
+    parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=DEFAULT_WANDB_ENTITY,
+        help="Optional W&B entity/team for logging comparison results",
     )
     parser.add_argument(
         "--wandb-name",
@@ -195,6 +206,7 @@ def main():
         args.name_b,
         wandb_project=args.wandb_project,
         wandb_name=args.wandb_name,
+        wandb_entity=args.wandb_entity,
     )
 
     print("\n✅ Comparison complete.")

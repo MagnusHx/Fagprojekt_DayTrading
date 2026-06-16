@@ -29,22 +29,44 @@ from kvant.ml_framework.train import (
 )
 from kvant.ml_framework.train.utils import class_weights_from_dataset
 from kvant.ml_framework.logging import WandbLogger
+from kvant.ml_framework.wandb_defaults import DEFAULT_WANDB_ENTITY, DEFAULT_WANDB_PROJECT
 
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
-default_project = os.environ.get("WANDB_PROJECT", "Kvant")
-entity = os.environ.get("WANDB_ENTITY", "s245509-danmarks-tekniske-universitet-dtu")
+default_project = DEFAULT_WANDB_PROJECT
+entity = DEFAULT_WANDB_ENTITY
 
 
 RESULT_METRICS = {
+    "val_accuracy": "val/classification/accuracy",
+    "val_f1_macro": "val/classification/f1_macro",
+    "val_meta_f1": "val/meta/f1",
+    "val_take_rate": "val/meta/take_rate",
+    "val_trade_signal_rate": "val/decision/trade_signal_rate",
+    "val_directional_acted_accuracy": "val/decision/directional_acted_accuracy",
+    "val_primary_confidence_threshold": "val/decision/primary_confidence_threshold",
+    "val_portfolio_total_return_pct": "val/portfolio/total_return_pct",
+    "val_portfolio_sharpe_ratio_annualized": "val/portfolio/sharpe_ratio_annualized",
+    "val_portfolio_max_drawdown_pct": "val/portfolio/max_drawdown_pct",
+    "val_portfolio_annualized_return_pct": "val/portfolio/annualized_return_pct",
+    "val_portfolio_average_trade_return_pct": "val/portfolio/average_trade_return_pct",
+    "val_portfolio_n_executed_trades": "val/portfolio/n_executed_trades",
+    "val_paper_net_return_total_pct": "val/paper/executed_trade_net_return_total_pct",
+    "val_paper_sharpe_ratio_annualized": "val/paper/sharpe_ratio_annualized",
+    "val_true_side_class_0_pct": "val/distribution/true_side/class_0_pct",
+    "val_true_side_class_1_pct": "val/distribution/true_side/class_1_pct",
+    "val_pred_side_class_0_pct": "val/distribution/pred_side/class_0_pct",
+    "val_pred_side_class_1_pct": "val/distribution/pred_side/class_1_pct",
+    "val_pred_side_class_0_count": "val/distribution/pred_side/class_0_count",
+    "val_pred_side_class_1_count": "val/distribution/pred_side/class_1_count",
     "test_accuracy": "test/classification/accuracy",
     "test_f1_macro": "test/classification/f1_macro",
     "test_meta_f1": "test/meta/f1",
     "test_take_rate": "test/meta/take_rate",
     "test_trade_signal_rate": "test/decision/trade_signal_rate",
     "test_directional_acted_accuracy": "test/decision/directional_acted_accuracy",
+    "test_primary_confidence_threshold": "test/decision/primary_confidence_threshold",
     "test_portfolio_total_return_pct": "test/portfolio/total_return_pct",
     "test_portfolio_sharpe_ratio_annualized": "test/portfolio/sharpe_ratio_annualized",
     "test_portfolio_max_drawdown_pct": "test/portfolio/max_drawdown_pct",
@@ -53,6 +75,12 @@ RESULT_METRICS = {
     "test_portfolio_n_executed_trades": "test/portfolio/n_executed_trades",
     "test_paper_net_return_total_pct": "test/paper/executed_trade_net_return_total_pct",
     "test_paper_sharpe_ratio_annualized": "test/paper/sharpe_ratio_annualized",
+    "test_true_side_class_0_pct": "test/distribution/true_side/class_0_pct",
+    "test_true_side_class_1_pct": "test/distribution/true_side/class_1_pct",
+    "test_pred_side_class_0_pct": "test/distribution/pred_side/class_0_pct",
+    "test_pred_side_class_1_pct": "test/distribution/pred_side/class_1_pct",
+    "test_pred_side_class_0_count": "test/distribution/pred_side/class_0_count",
+    "test_pred_side_class_1_count": "test/distribution/pred_side/class_1_count",
 }
 
 
@@ -254,6 +282,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-batch-size", type=int, default=256)
     p.add_argument("--eval-batch-size", type=int, default=512)
     p.add_argument("--wandb-project", type=str, default=default_project)
+    p.add_argument("--wandb-entity", type=str, default=entity)
     p.add_argument("--wandb-name", type=str, default=None)
     p.add_argument("--wandb-api-timeout", type=int, default=29)
     p.add_argument(
@@ -296,6 +325,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.5,
         help="Minimum meta-label probability required before taking the primary side prediction.",
+    )
+    p.add_argument(
+        "--primary-confidence-threshold",
+        type=float,
+        default=0.0,
+        help="Minimum primary-model predicted-class confidence required before accepting a trade signal.",
     )
     p.add_argument(
         "--meta-features",
@@ -346,6 +381,8 @@ def parse_args() -> argparse.Namespace:
         args.meta_features = _parse_meta_features(args.meta_features)
     if not (0.0 <= args.meta_accept_threshold <= 1.0):
         raise SystemExit("--meta-accept-threshold must be between 0 and 1.")
+    if not (0.0 <= args.primary_confidence_threshold <= 1.0):
+        raise SystemExit("--primary-confidence-threshold must be between 0 and 1.")
     if args.kelly_fraction < 0.0:
         raise SystemExit("--kelly-fraction must be non-negative.")
     if args.kelly_payoff_ratio <= 0.0:
@@ -443,6 +480,7 @@ def _save_best_checkpoint_bundle(
             "meta_features": list(args.meta_features),
             "meta_random_state": int(args.seed),
             "meta_accept_threshold": float(args.meta_accept_threshold),
+            "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
             "portfolio_initial_cash": float(args.portfolio_initial_cash),
             "portfolio_max_position_fraction": float(args.portfolio_max_position_fraction),
@@ -470,7 +508,7 @@ def _make_logger(
 ) -> WandbLogger:
     return WandbLogger(
         project=args.wandb_project,
-        entity=entity,
+        entity=args.wandb_entity,
         name=(args.wandb_name or "stocks-run")
         if fold_tag is None
         else f"{(args.wandb_name or 'stocks-run')}-{fold_tag}",
@@ -499,11 +537,14 @@ def _make_logger(
             else int(args.early_stopping_patience),
             "early_stopping_min_delta": float(args.early_stopping_min_delta),
             "wandb_metric_mode": "compact",
+            "wandb_project": args.wandb_project,
+            "wandb_entity": args.wandb_entity,
             "class_weights": None,
             "pipeline_stage": args.pipeline_stage,
             "meta_model": "logreg",
             "meta_features": list(args.meta_features),
             "meta_accept_threshold": float(args.meta_accept_threshold),
+            "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
             "kelly_fraction": float(args.kelly_fraction),
@@ -608,9 +649,12 @@ def _runtime_metadata(args: argparse.Namespace, *, exp_dir: Path, fold_tag: str 
         "seed_numpy": int(args.seed),
         "seed_torch": int(args.seed),
         "epochs": int(args.epochs),
+        "wandb_project": str(args.wandb_project),
+        "wandb_entity": str(args.wandb_entity),
         "meta_model": "logreg",
         "meta_features": list(args.meta_features),
         "meta_accept_threshold": float(args.meta_accept_threshold),
+        "primary_confidence_threshold": float(args.primary_confidence_threshold),
         "transaction_cost": float(args.transaction_cost),
         "kelly_fraction": float(args.kelly_fraction),
         "kelly_payoff_ratio": float(args.kelly_payoff_ratio),
@@ -715,6 +759,8 @@ def run_single_fold(
             "eval_batch_size": args.eval_batch_size,
             "full_eval_every": getattr(args, "full_eval_every", 3),
             "wandb_metric_mode": "compact",
+            "wandb_project": args.wandb_project,
+            "wandb_entity": args.wandb_entity,
             "class_weights": w.tolist(),
             "n_classes": 2,
             "event_label_semantics": exp.label_semantics,
@@ -722,6 +768,7 @@ def run_single_fold(
             "meta_model": "logreg",
             "meta_features": list(args.meta_features),
             "meta_accept_threshold": float(args.meta_accept_threshold),
+            "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
             "kelly_fraction": float(args.kelly_fraction),
@@ -753,6 +800,7 @@ def run_single_fold(
                 meta_features=args.meta_features,
                 meta_random_state=int(args.seed),
                 meta_accept_threshold=float(args.meta_accept_threshold),
+                primary_confidence_threshold=float(args.primary_confidence_threshold),
                 initial_portfolio=args.initial_portfolio,
                 portfolio_initial_cash=float(args.portfolio_initial_cash),
                 portfolio_max_position_fraction=float(args.portfolio_max_position_fraction),

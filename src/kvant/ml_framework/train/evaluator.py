@@ -40,6 +40,23 @@ _PAPER_METRICS_TO_KEEP = {
 }
 
 
+def _class_distribution_metrics(
+    values: np.ndarray,
+    *,
+    labels: tuple[int, ...],
+    prefix: str,
+) -> Dict[str, float | int]:
+    """Return count and percentage metrics for class labels."""
+    arr = np.asarray(values, dtype=np.int64)
+    n = int(len(arr))
+    metrics: Dict[str, float | int] = {f"{prefix}/n": n}
+    for label in labels:
+        count = int(np.sum(arr == int(label)))
+        metrics[f"{prefix}/class_{int(label)}_count"] = count
+        metrics[f"{prefix}/class_{int(label)}_pct"] = float(count / n) if n else 0.0
+    return metrics
+
+
 @dataclass(frozen=True)
 class EvalConfig:
     compute_per_ticker_accuracy: bool = True
@@ -61,6 +78,7 @@ class EvalConfig:
     meta_features: tuple[str, ...] = DEFAULT_META_FEATURES
     meta_random_state: int = 1337
     meta_accept_threshold: float = 0.5
+    primary_confidence_threshold: float = 0.0
     kelly_fraction: float = 0.25
     kelly_payoff_ratio: float = 1.0
 
@@ -87,6 +105,8 @@ class ExperimentEvaluator:
             raise RuntimeError(f"Unsupported meta_model={self.cfg.meta_model!r}.")
         if not (0.0 <= float(self.cfg.meta_accept_threshold) <= 1.0):
             raise RuntimeError("meta_accept_threshold must be between 0 and 1.")
+        if not (0.0 <= float(self.cfg.primary_confidence_threshold) <= 1.0):
+            raise RuntimeError("primary_confidence_threshold must be between 0 and 1.")
         if float(self.cfg.kelly_fraction) < 0.0:
             raise RuntimeError("kelly_fraction must be non-negative.")
         if float(self.cfg.kelly_payoff_ratio) <= 0.0:
@@ -157,6 +177,16 @@ class ExperimentEvaluator:
             payoff_ratio=float(self.cfg.kelly_payoff_ratio),
             fraction=float(self.cfg.kelly_fraction),
         )
+        if float(self.cfg.primary_confidence_threshold) > 0.0:
+            confidence = np.asarray(pred_out["y_pred_confidence"], dtype=np.float64)
+            if len(confidence) != len(y_trade):
+                raise RuntimeError(
+                    "Prediction confidence length does not match trade decisions: "
+                    f"{len(confidence)} vs {len(y_trade)}."
+                )
+            low_confidence_mask = confidence < float(self.cfg.primary_confidence_threshold)
+            y_trade[low_confidence_mask] = LABEL_EXIT
+            bet_size[low_confidence_mask] = 0.0
 
         acted_mask = np.isin(y_trade, ACTED_LABELS) & (bet_size > 0.0)
         actionable_truth_mask = np.isin(event_true, ACTED_LABELS)
@@ -171,6 +201,28 @@ class ExperimentEvaluator:
         )
         metrics[f"{split}/classification/accuracy"] = float(cls["accuracy"])
         metrics[f"{split}/classification/f1_macro"] = float(cls.get("f1_macro", 0.0))
+        metrics[f"{split}/decision/primary_confidence_threshold"] = float(self.cfg.primary_confidence_threshold)
+        metrics.update(
+            _class_distribution_metrics(
+                side_true[valid_side_mask],
+                labels=self.cfg.labels,
+                prefix=f"{split}/distribution/true_side",
+            )
+        )
+        metrics.update(
+            _class_distribution_metrics(
+                side_pred[valid_side_mask],
+                labels=self.cfg.labels,
+                prefix=f"{split}/distribution/pred_side",
+            )
+        )
+        metrics.update(
+            _class_distribution_metrics(
+                y_trade,
+                labels=tuple(sorted(set(int(label) for label in ACTED_LABELS) | {int(LABEL_EXIT)})),
+                prefix=f"{split}/distribution/trade_signal",
+            )
+        )
 
         meta_precision, meta_recall, meta_f1, _ = precision_recall_fscore_support(
             meta_true,
