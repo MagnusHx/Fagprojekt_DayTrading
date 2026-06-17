@@ -155,6 +155,17 @@ Expected output:
 results/main/E1_timebar_conv1d_nometa.csv
 ```
 
+### HPC Run For Steps 1 And 3
+
+Submit this from the repository root on DTU HPC:
+
+```bash
+bsub < hpc_experiment_1_rq1.sh
+```
+
+The job script follows the LSF batch-job pattern used on DTU HPC: explicit job name, queue, walltime, single-node CPU
+span, per-slot memory request and limit, non-appending log files, and module loading inside the batch job.
+
 ## Step 4: Train The CUSUM/TB Conv1D Grid
 
 Grid runs use fixed bet size `1.0`, so the time-bar/CUSUM and meta-selection comparisons are not affected by Kelly
