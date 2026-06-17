@@ -18,12 +18,10 @@ from kvant.ml_framework.utils.statistical_tests import calculate_ci, paired_ttes
 DEFAULT_METRICS = [
     "test_accuracy",
     "test_f1_macro",
-    "test_trade_signal_rate",
-    "test_directional_acted_accuracy",
-    "test_portfolio_total_return_pct",
-    "test_portfolio_sharpe_ratio_annualized",
-    "test_portfolio_max_drawdown_pct",
-    "test_portfolio_n_executed_trades",
+    "test_true_side_class_0_pct",
+    "test_true_side_class_1_pct",
+    "test_pred_side_class_0_pct",
+    "test_pred_side_class_1_pct",
 ]
 
 
@@ -218,6 +216,98 @@ def write_confusion_matrices(
         pd.DataFrame(rows).to_csv(table_dir / f"confusion_matrices_{split}.csv", index=False)
 
 
+def _class_distribution_summary(loaded: dict[str, pd.DataFrame], split: str) -> pd.DataFrame:
+    """Summarize true and predicted binary class distributions for each run."""
+    required = [
+        f"{split}_true_side_class_0_pct",
+        f"{split}_true_side_class_1_pct",
+        f"{split}_pred_side_class_0_pct",
+        f"{split}_pred_side_class_1_pct",
+    ]
+    rows = []
+    for run_name, df in loaded.items():
+        if any(column not in df.columns for column in required):
+            continue
+        row = {
+            "run": run_name,
+            "folds": int(len(df)),
+            "true_class_0_pct_mean": float(df[f"{split}_true_side_class_0_pct"].mean()),
+            "true_class_1_pct_mean": float(df[f"{split}_true_side_class_1_pct"].mean()),
+            "pred_class_0_pct_mean": float(df[f"{split}_pred_side_class_0_pct"].mean()),
+            "pred_class_1_pct_mean": float(df[f"{split}_pred_side_class_1_pct"].mean()),
+        }
+        for metric in (f"{split}_accuracy", f"{split}_f1_macro"):
+            if metric in df.columns:
+                row[f"{metric}_mean"] = float(df[metric].mean())
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def write_class_distribution_plot(
+    loaded: dict[str, pd.DataFrame],
+    *,
+    output_dir: Path,
+    table_dir: Path,
+    split: str = "test",
+) -> None:
+    """Write true-vs-predicted class distribution table and stacked-bar figure."""
+    summary = _class_distribution_summary(loaded, split)
+    if summary.empty:
+        return
+
+    table_dir.mkdir(parents=True, exist_ok=True)
+    summary.to_csv(table_dir / f"class_distribution_{split}.csv", index=False)
+
+    y = np.arange(len(summary))
+    bar_height = 0.34
+    fig_height = max(5.5, 0.55 * len(summary) + 2.0)
+    fig, ax = plt.subplots(figsize=(13, fig_height), dpi=150)
+
+    true_down = summary["true_class_0_pct_mean"].to_numpy(dtype=float)
+    true_up = summary["true_class_1_pct_mean"].to_numpy(dtype=float)
+    pred_down = summary["pred_class_0_pct_mean"].to_numpy(dtype=float)
+    pred_up = summary["pred_class_1_pct_mean"].to_numpy(dtype=float)
+
+    ax.barh(y - bar_height / 2, true_down, height=bar_height, color="#8fb6d9", label="True down")
+    ax.barh(y - bar_height / 2, true_up, left=true_down, height=bar_height, color="#d7a85d", label="True up")
+    ax.barh(y + bar_height / 2, pred_down, height=bar_height, color="#236192", label="Pred down")
+    ax.barh(y + bar_height / 2, pred_up, left=pred_down, height=bar_height, color="#a65f00", label="Pred up")
+
+    for row_idx, row in summary.iterrows():
+        ax.text(
+            1.015,
+            row_idx - bar_height / 2,
+            f"true {row['true_class_0_pct_mean']:.2f}/{row['true_class_1_pct_mean']:.2f}",
+            va="center",
+            fontsize=8,
+        )
+        ax.text(
+            1.015,
+            row_idx + bar_height / 2,
+            f"pred {row['pred_class_0_pct_mean']:.2f}/{row['pred_class_1_pct_mean']:.2f}",
+            va="center",
+            fontsize=8,
+        )
+
+    ax.axvline(0.5, color="#2f2f2f", linestyle="--", linewidth=1, alpha=0.55)
+    ax.set_xlim(0, 1.18)
+    ax.set_yticks(y)
+    ax.set_yticklabels(summary["run"])
+    ax.invert_yaxis()
+    ax.set_xlabel(f"Share of {split} samples")
+    ax.set_title(f"{split.title()} True vs Predicted Class Distribution")
+    ax.legend(ncol=4, loc="lower center", bbox_to_anchor=(0.5, -0.08), frameon=False)
+    ax.grid(axis="x", alpha=0.2)
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    fig.tight_layout()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"predicted_vs_true_class_distribution_{split}"
+    fig.savefig(output_dir / f"{stem}.png", bbox_inches="tight")
+    fig.savefig(output_dir / f"{stem}.pdf", bbox_inches="tight")
+    plt.close(fig)
+
+
 def _extract_grid_params(run_name: str) -> tuple[float, float] | None:
     """Extract CUSUM and triple-barrier percent values from an E2 grid run name."""
     match = re.search(r"tb(?P<tb>\d+(?:p\d+)?)-cusum(?P<cusum>\d+(?:p\d+)?)", run_name)
@@ -340,6 +430,7 @@ def main() -> None:
     write_metric_plots(summary, metrics, figure_dir)
     write_grid_heatmap(summary, metric=str(args.grid_heatmap_metric), output_dir=figure_dir)
     write_confusion_matrices(loaded, output_dir=figure_dir, table_dir=table_dir, split="test")
+    write_class_distribution_plot(loaded, output_dir=figure_dir, table_dir=table_dir, split="test")
 
     if args.comparison:
         tests = write_pairwise_tests(

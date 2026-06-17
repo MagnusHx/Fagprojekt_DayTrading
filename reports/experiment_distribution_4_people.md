@@ -33,6 +33,11 @@ Protocol note: all main comparison runs use fixed bet size `1.0`, including meta
 a later explicit sizing ablation, so the timebar-vs-CUSUM and no-meta-vs-meta comparisons are not affected by
 position-size differences.
 
+Metric protocol: the no-meta timebar-vs-CUSUM runs compare primary-model predictive quality only. Use macro F1,
+accuracy, confusion matrices, and true-vs-predicted class distributions for that comparison. Do not use no-meta
+portfolio metrics as the main conclusion. Portfolio and decision metrics become primary again for confidence-threshold
+and meta-selection runs, where the experiment explicitly tests trade filtering.
+
 ## Phase 1: Person 1 Runs The Full Grid
 
 Person 1 owns the full grid workflow from data preparation to best-config selection.
@@ -100,11 +105,13 @@ echo "$BEST_MANIFEST"
 uv run python scripts/generate_experiment_report.py \
   --results-glob "results/grid_search/E2-grid-conv1d-w240-*.csv" \
   --metric val_f1_macro \
-  --metric val_portfolio_sharpe_ratio_annualized \
-  --metric val_portfolio_total_return_pct \
+  --metric val_accuracy \
   --metric test_f1_macro \
-  --metric test_portfolio_sharpe_ratio_annualized \
-  --metric test_portfolio_total_return_pct \
+  --metric test_accuracy \
+  --metric test_true_side_class_0_pct \
+  --metric test_true_side_class_1_pct \
+  --metric test_pred_side_class_0_pct \
+  --metric test_pred_side_class_1_pct \
   --grid-heatmap-metric val_f1_macro
 ```
 
@@ -120,8 +127,11 @@ artifacts/final_plan/selected_grid.env
 reports/promising_grid_configs.json
 reports/generated/tables/summary_metrics.csv
 reports/generated/tables/summary_metrics.tex
+reports/generated/tables/class_distribution_test.csv
 reports/generated/figures/grid_heatmap_val_f1_macro.png
 reports/generated/figures/grid_heatmap_val_f1_macro.pdf
+reports/generated/figures/predicted_vs_true_class_distribution_test.png
+reports/generated/figures/predicted_vs_true_class_distribution_test.pdf
 ```
 
 Everyone else places the shared files at the same paths and runs:
@@ -240,6 +250,8 @@ The printed CSV path should exist locally and must be shared for final aggregati
 ### Person 4: Confidence Sweep And Meta-Selection Sweep
 
 These sweeps use fixed bet size `1.0`; the meta-selection sweep tests TAKE/PASS filtering, not Kelly sizing.
+For these sweeps, decision and portfolio metrics are part of the main interpretation because the policy now chooses
+which signals to trade.
 
 ```bash
 source artifacts/final_plan/selected_grid.env
@@ -300,16 +312,16 @@ uv run python scripts/generate_experiment_report.py \
   --results-glob "$BEST_META_GLOB" \
   --metric test_accuracy \
   --metric test_f1_macro \
+  --metric test_true_side_class_0_pct \
+  --metric test_true_side_class_1_pct \
+  --metric test_pred_side_class_0_pct \
+  --metric test_pred_side_class_1_pct \
   --metric test_trade_signal_rate \
   --metric test_directional_acted_accuracy \
   --metric test_portfolio_total_return_pct \
   --metric test_portfolio_sharpe_ratio_annualized \
   --metric test_portfolio_max_drawdown_pct \
   --metric test_portfolio_n_executed_trades \
-  --metric test_true_side_class_0_pct \
-  --metric test_true_side_class_1_pct \
-  --metric test_pred_side_class_0_pct \
-  --metric test_pred_side_class_1_pct \
   --metric test_trade_signal_class_0_pct \
   --metric test_trade_signal_class_1_pct \
   --metric test_trade_signal_class_2_pct \
@@ -325,6 +337,7 @@ reports/generated/tables/dataset_summary.csv
 reports/generated/tables/dataset_summary.tex
 reports/generated/tables/summary_metrics.csv
 reports/generated/tables/summary_metrics.tex
+reports/generated/tables/class_distribution_test.csv
 reports/generated/tables/confusion_matrices_test.csv
 reports/generated/tables/pairwise_tests.csv
 reports/generated/tables/pairwise_tests.tex

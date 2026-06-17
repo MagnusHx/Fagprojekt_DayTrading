@@ -29,7 +29,9 @@ def _extract_params(run_name: str) -> tuple[int, float, float] | None:
 def _manifest_path(*, width: int, tb_pct: float, cusum_pct: float) -> Path:
     """Return the manifest path produced by prepare_experiment for this config."""
     cusum_h = cusum_pct / 100.0
-    return Path("src/kvant/ml_framework/prepared") / f"sb_L_12_w{width}_h{tb_pct:g}_fixedCUSUM{cusum_h:g}_cv_manifest.json"
+    return (
+        Path("src/kvant/ml_framework/prepared") / f"sb_L_12_w{width}_h{tb_pct:g}_fixedCUSUM{cusum_h:g}_cv_manifest.json"
+    )
 
 
 def _score_csv(path: Path, *, metric: str, tie_breakers: list[str]) -> dict[str, float | str | int]:
@@ -109,7 +111,7 @@ def main() -> None:
     parser.add_argument(
         "--tie-breaker",
         action="append",
-        default=["val_portfolio_sharpe_ratio_annualized", "val_portfolio_total_return_pct"],
+        default=["val_accuracy"],
     )
     parser.add_argument("--selection-json", type=Path, default=Path("artifacts/final_plan/selected_grid.json"))
     parser.add_argument("--env-out", type=Path, default=Path("artifacts/final_plan/selected_grid.env"))

@@ -18,7 +18,7 @@ transfers to intraday U.S. equities.
 ```text
 RQ1: How does a reference-inspired machine learning trading pipeline perform when applied to intraday U.S. equities?
 
-RQ2: Does CUSUM sampling with triple-barrier labelling improve predictive and economic performance compared with a
+RQ2: Does CUSUM sampling with triple-barrier labelling improve primary-model predictive performance compared with a
      time-based baseline?
 
 RQ3: Does confidence-based selective trading improve the quality and risk-adjusted performance of executed trades?
@@ -171,6 +171,11 @@ span, per-slot memory request and limit, non-appending log files, and module loa
 Grid runs use fixed bet size `1.0`, so the time-bar/CUSUM and meta-selection comparisons are not affected by Kelly
 sizing. Kelly is reserved for a later explicit sizing ablation.
 
+The no-meta time-bar/CUSUM comparison is a primary-model comparison. It should be interpreted using macro F1, accuracy,
+confusion matrices, and true-vs-predicted class distributions. Portfolio metrics may still be logged for diagnostics,
+but they are not the main evidence for RQ2 because no-meta trades every signal and portfolio constraints can dominate
+the economic result.
+
 First print/write the command plan:
 
 ```bash
@@ -216,8 +221,8 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid
 
 ## Step 5: Select The Best Grid Config
 
-This uses validation metrics only. The default primary selection metric is `val_f1_macro`, with validation Sharpe and
-validation total return as tie-breakers.
+This uses validation metrics only. For the no-meta CUSUM/TB grid, select by predictive quality, not portfolio outcome.
+The default primary selection metric is `val_f1_macro`, with `val_accuracy` as the default tie-breaker.
 
 ```bash
 uv run python scripts/select_best_grid_config.py \
@@ -256,11 +261,13 @@ echo "$BEST_MANIFEST"
 uv run python scripts/generate_experiment_report.py \
   --results-glob "results/grid_search/E2-grid-conv1d-w240-*.csv" \
   --metric val_f1_macro \
-  --metric val_portfolio_sharpe_ratio_annualized \
-  --metric val_portfolio_total_return_pct \
+  --metric val_accuracy \
   --metric test_f1_macro \
-  --metric test_portfolio_sharpe_ratio_annualized \
-  --metric test_portfolio_total_return_pct \
+  --metric test_accuracy \
+  --metric test_true_side_class_0_pct \
+  --metric test_true_side_class_1_pct \
+  --metric test_pred_side_class_0_pct \
+  --metric test_pred_side_class_1_pct \
   --grid-heatmap-metric val_f1_macro
 ```
 
@@ -269,13 +276,19 @@ Expected outputs:
 ```text
 reports/generated/tables/summary_metrics.csv
 reports/generated/tables/summary_metrics.tex
+reports/generated/tables/class_distribution_test.csv
 reports/generated/figures/grid_heatmap_val_f1_macro.png
 reports/generated/figures/grid_heatmap_val_f1_macro.pdf
+reports/generated/figures/predicted_vs_true_class_distribution_test.png
+reports/generated/figures/predicted_vs_true_class_distribution_test.pdf
 ```
 
 ## Step 7: Compare Time-Bar Conv1D Against Best CUSUM/TB Conv1D
 
 Run after `source artifacts/final_plan/selected_grid.env`.
+
+This comparison is intentionally classification-only. Do not use no-meta portfolio returns, Sharpe, drawdown, or
+executed-trade count as the main CUSUM-vs-timebar conclusion.
 
 ```bash
 uv run python scripts/compare_experiments.py \
@@ -286,23 +299,15 @@ uv run python scripts/compare_experiments.py \
   --metrics \
     test_accuracy \
     test_f1_macro \
-    test_trade_signal_rate \
-    test_directional_acted_accuracy \
-    test_portfolio_total_return_pct \
-    test_portfolio_sharpe_ratio_annualized \
-    test_portfolio_max_drawdown_pct \
     test_true_side_class_0_pct \
     test_true_side_class_1_pct \
     test_pred_side_class_0_pct \
     test_pred_side_class_1_pct \
-    test_trade_signal_class_0_pct \
-    test_trade_signal_class_1_pct \
-    test_trade_signal_class_2_pct \
   --wandb-project day-trading-experiments \
   --wandb-name E2-timebar-vs-best-cusumtb
 ```
 
-This is the main RQ2 comparison.
+This is the main RQ2 comparison. Use the generated confusion matrix figures as the report-level error analysis.
 
 ## Step 8: Prepare Density-Matched Time-Bar Control
 
@@ -445,6 +450,7 @@ echo "$BEST_RESNET_RESULT"
 ## Step 14: Compare Conv1D Against ResNet-LSTM
 
 Run after `source artifacts/final_plan/selected_grid.env`.
+If the ResNet-LSTM run is no-meta, compare architecture quality using classification metrics only.
 
 ```bash
 uv run python scripts/compare_experiments.py \
@@ -455,18 +461,18 @@ uv run python scripts/compare_experiments.py \
   --metrics \
     test_accuracy \
     test_f1_macro \
-    test_trade_signal_rate \
-    test_directional_acted_accuracy \
-    test_portfolio_total_return_pct \
-    test_portfolio_sharpe_ratio_annualized \
-    test_portfolio_max_drawdown_pct \
+    test_true_side_class_0_pct \
+    test_true_side_class_1_pct \
+    test_pred_side_class_0_pct \
+    test_pred_side_class_1_pct \
   --wandb-project day-trading-experiments \
   --wandb-name E3-conv1d-vs-resnet
 ```
 
 ## Step 15: Run Confidence-Based Selective Trading Sweep
 
-This tests RQ3.
+This tests RQ3. These runs introduce a decision threshold, so they can use decision and portfolio metrics in addition
+to classification metrics.
 
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-confidence \
@@ -485,6 +491,7 @@ ls $BEST_CONFIDENCE_GLOB
 ## Step 16: Run Meta-Selection Sweep
 
 This tests RQ4 with fixed bet size `1.0`; it isolates whether the meta-model improves TAKE/PASS selection.
+For meta-selection, report take rate, meta F1, acted directional accuracy, executed trade count, and portfolio metrics.
 
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-meta \
@@ -520,16 +527,16 @@ uv run python scripts/generate_experiment_report.py \
   --results-glob "$BEST_META_GLOB" \
   --metric test_accuracy \
   --metric test_f1_macro \
+  --metric test_true_side_class_0_pct \
+  --metric test_true_side_class_1_pct \
+  --metric test_pred_side_class_0_pct \
+  --metric test_pred_side_class_1_pct \
   --metric test_trade_signal_rate \
   --metric test_directional_acted_accuracy \
   --metric test_portfolio_total_return_pct \
   --metric test_portfolio_sharpe_ratio_annualized \
   --metric test_portfolio_max_drawdown_pct \
   --metric test_portfolio_n_executed_trades \
-  --metric test_true_side_class_0_pct \
-  --metric test_true_side_class_1_pct \
-  --metric test_pred_side_class_0_pct \
-  --metric test_pred_side_class_1_pct \
   --metric test_trade_signal_class_0_pct \
   --metric test_trade_signal_class_1_pct \
   --metric test_trade_signal_class_2_pct \
@@ -543,6 +550,7 @@ Expected outputs:
 ```text
 reports/generated/tables/summary_metrics.csv
 reports/generated/tables/summary_metrics.tex
+reports/generated/tables/class_distribution_test.csv
 reports/generated/tables/confusion_matrices_test.csv
 reports/generated/tables/pairwise_tests.csv
 reports/generated/tables/pairwise_tests.tex
@@ -574,6 +582,19 @@ Training logs classification, decision, and portfolio metrics. It also logs clas
 
 Use these to catch prediction collapse, for example a model predicting only one class.
 
+For no-meta time-bar/CUSUM runs, the report should focus on:
+
+```text
+test_f1_macro
+test_accuracy
+confusion matrix counts/figures
+true-side class distribution
+predicted-side class distribution
+```
+
+Decision and portfolio metrics become primary only in confidence-threshold and meta-selection experiments, where the
+research question is explicitly about trade filtering and execution quality.
+
 Training also writes fold-level confusion matrix counts to the result CSV:
 
 ```text
@@ -585,6 +606,14 @@ Training also writes fold-level confusion matrix counts to the result CSV:
 
 `scripts/generate_experiment_report.py` aggregates those counts across folds and writes report-ready confusion matrix
 figures when the columns are present.
+
+The same report script also writes the class-distribution comparison:
+
+```text
+reports/generated/tables/class_distribution_test.csv
+reports/generated/figures/predicted_vs_true_class_distribution_test.png
+reports/generated/figures/predicted_vs_true_class_distribution_test.pdf
+```
 
 ## Training Defaults
 
@@ -627,9 +656,11 @@ explicit sizing ablation:
 | Dataset/sample count table | `reports/generated/tables/dataset_summary.tex` |
 | Main metric table | `reports/generated/tables/summary_metrics.tex` |
 | Pairwise statistical tests | `reports/generated/tables/pairwise_tests.tex` |
+| True/predicted class distribution table | `reports/generated/tables/class_distribution_test.csv` |
 | Confusion matrix counts | `reports/generated/tables/confusion_matrices_test.csv` |
 | Sample count figure | `reports/generated/figures/sample_count_comparison.pdf` |
 | Grid heatmap | `reports/generated/figures/grid_heatmap_val_f1_macro.pdf` |
+| True/predicted class distribution figure | `reports/generated/figures/predicted_vs_true_class_distribution_test.pdf` |
 | Confusion matrix figures | `reports/generated/figures/confusion_matrix_test_*.pdf` |
 | Metric comparison figures | `reports/generated/figures/*.pdf` |
 
@@ -638,8 +669,9 @@ explicit sizing ablation:
 1. Choose CUSUM/TB parameters using validation metrics only.
 2. Use test metrics only for final reporting.
 3. Treat a result as meaningful only if it is both practically relevant and statistically supported across folds.
-4. Use classification metrics for model quality.
-5. Use decision metrics for accepted-signal quality.
-6. Use portfolio metrics for economic outcome.
+4. For no-meta time-bar/CUSUM comparisons, use macro F1, accuracy, confusion matrices, and true-vs-predicted class distributions.
+5. Do not use no-meta portfolio metrics as the main RQ2 conclusion.
+6. Use decision metrics for accepted-signal quality in confidence-threshold and meta-selection runs.
+7. Use portfolio metrics for economic outcome only when the experiment includes an explicit trade-selection policy.
 
 This is a research codebase, not a live trading system or investment recommendation.

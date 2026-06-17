@@ -220,26 +220,33 @@ def compute_portfolio_metrics(
         equity_curve["exposure_pct"].append(float(exposure_pct))
         equity_curve["open_positions"].append(int(len(positions)))
 
+    def close_position(trade: BacktestTrade) -> bool:
+        nonlocal cash, transaction_cost_total
+
+        key = (int(trade.tid), int(trade.signal_tpos))
+        position = open_by_key.pop(key, None)
+        if position is None:
+            return False
+
+        exit_notional = float(position.shares) * float(trade.exit_price)
+        exit_cost = exit_notional * float(simulator.transaction_cost)
+        transaction_cost_total += exit_cost
+        if int(position.side) == LABEL_UP:
+            cash += exit_notional - exit_cost
+            pnl = exit_notional - position.entry_notional - position.entry_cost - exit_cost
+        else:
+            cash -= exit_notional + exit_cost
+            pnl = position.entry_notional - exit_notional - position.entry_cost - exit_cost
+        positions.remove(position)
+        realized_trade_pnl.append(float(pnl))
+        realized_trade_return.append(float(pnl / max(position.entry_notional, 1e-12)))
+        return True
+
     for timestamp in event_times:
         mark_positions(timestamp)
 
         for trade in exits_by_time.get(timestamp, []):
-            key = (int(trade.tid), int(trade.signal_tpos))
-            position = open_by_key.pop(key, None)
-            if position is None:
-                continue
-            exit_notional = float(position.shares) * float(trade.exit_price)
-            exit_cost = exit_notional * float(simulator.transaction_cost)
-            transaction_cost_total += exit_cost
-            if int(position.side) == LABEL_UP:
-                cash += exit_notional - exit_cost
-                pnl = exit_notional - position.entry_notional - position.entry_cost - exit_cost
-            else:
-                cash -= exit_notional + exit_cost
-                pnl = position.entry_notional - exit_notional - position.entry_cost - exit_cost
-            positions.remove(position)
-            realized_trade_pnl.append(float(pnl))
-            realized_trade_return.append(float(pnl / max(position.entry_notional, 1e-12)))
+            close_position(trade)
 
         mark_positions(timestamp)
         for trade in entries_by_time.get(timestamp, []):
@@ -284,6 +291,9 @@ def compute_portfolio_metrics(
             )
             positions.append(position)
             open_by_key[(int(trade.tid), int(trade.signal_tpos))] = position
+
+        for trade in exits_by_time.get(timestamp, []):
+            close_position(trade)
 
         append_curve(timestamp)
 

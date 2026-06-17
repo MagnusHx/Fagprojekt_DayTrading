@@ -46,6 +46,15 @@ def _simulator(
     )
 
 
+def _same_bar_exit_simulator(market_data: dict[int, dict[str, np.ndarray]]) -> BacktestTradeSimulator:
+    return BacktestTradeSimulator(
+        market_data_store=_FakeMarketDataStore(market_data),
+        width_minutes=0,
+        barrier_height=0.50,
+        transaction_cost=0.0,
+    )
+
+
 def test_portfolio_balance_rises_for_profitable_long() -> None:
     result = compute_portfolio_metrics(
         y_true=np.asarray([LABEL_UP]),
@@ -64,6 +73,25 @@ def test_portfolio_balance_rises_for_profitable_long() -> None:
     assert result.metrics["portfolio/total_return_pct"] == pytest.approx(1.0)
     assert result.metrics["portfolio/cumulative_annual_profit_pct"] == pytest.approx(1.0)
     assert result.metrics["portfolio/n_executed_trades"] == 1
+
+
+def test_portfolio_closes_same_timestamp_entry_exit_trade() -> None:
+    result = compute_portfolio_metrics(
+        y_true=np.asarray([LABEL_UP]),
+        y_pred=np.asarray([LABEL_UP]),
+        tids=np.asarray([0]),
+        tpos=np.asarray([0]),
+        simulator=_same_bar_exit_simulator({0: _market([100.0, 100.0, 100.0])}),
+        initial_cash=10_000.0,
+        max_position_fraction=0.10,
+        max_total_exposure=1.0,
+        max_positions=10,
+        risk_free_rate=0.0,
+    )
+
+    assert result.metrics["portfolio/n_executed_trades"] == 1
+    assert result.equity_curve["open_positions"][-1] == 0
+    assert result.metrics["portfolio/total_return_pct"] == pytest.approx(0.0)
 
 
 def test_portfolio_balance_rises_for_profitable_short() -> None:
