@@ -1,0 +1,6 @@
+run,true0_pred0,true0_pred1,true1_pred0,true1_pred1
+tb1-cusum 1,4164,11537,3690,10824
+tb2-cusum 1,5511,4922,4926,5086
+tb4-cusum 1,1346,2677,1294,2925
+tb6-cusum 1,525,1007,623,1350
+Timebar 15m,87929,73450,88912,83877
