@@ -39,7 +39,7 @@ RQ4: Does a learned meta-selection model improve trade selection beyond the prim
 | CUSUM thresholds | 1%, 2%, 3% |
 | Triple-barrier heights | 1%, 2%, 4%, 6% |
 | Vertical barrier width | 240 minutes |
-| Transaction cost | 0.001 |
+| Transaction cost | 0 |
 | Random seed | 1337 |
 | W&B project | `day-trading-experiments` |
 
@@ -142,7 +142,7 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --checkpoint-out-dir artifacts/E1_timebar_conv1d_nometa \
   --wandb-project day-trading-experiments \
   --wandb-name E1-timebar-conv1d-nometa \
-  --transaction-cost 0.001 \
+  --transaction-cost 0 \
   --bet-sizing fixed \
   --no-meta \
   --fixed-bet-size 1.0 \
@@ -335,7 +335,7 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --checkpoint-out-dir artifacts/E2_timebar_density_matched_nextbar \
   --wandb-project day-trading-experiments \
   --wandb-name E2-timebar-density-matched-nextbar \
-  --transaction-cost 0.001 \
+  --transaction-cost 0 \
   --bet-sizing fixed \
   --no-meta \
   --fixed-bet-size 1.0 \
@@ -418,7 +418,7 @@ uv run python scripts/simple_baselines.py \
 ```bash
 uv run python scripts/buy_and_hold_baseline.py \
   --cv-manifest "$BEST_MANIFEST" \
-  --transaction-cost 0.001 \
+  --transaction-cost 0 \
   --wandb-project day-trading-experiments \
   --wandb-name E0-buy-and-hold \
   --output results/baselines/E0_buy_and_hold.csv

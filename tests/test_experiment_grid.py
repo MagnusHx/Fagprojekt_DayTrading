@@ -60,7 +60,7 @@ def test_train_command_builds_conv1d_threshold_run() -> None:
     cmd = train_command(
         run,
         epochs=20,
-        transaction_cost=0.001,
+        transaction_cost=0.0,
         wandb_project="day-trading-experiments",
         wandb_entity="team-entity",
         extra_args=("--no-save-best-checkpoint",),
@@ -84,4 +84,6 @@ def test_train_command_builds_conv1d_threshold_run() -> None:
     assert "day-trading-experiments" in cmd
     assert "--wandb-entity" in cmd
     assert "team-entity" in cmd
+    assert "--transaction-cost" in cmd
+    assert cmd[cmd.index("--transaction-cost") + 1] == "0"
     assert "--no-save-best-checkpoint" in cmd
