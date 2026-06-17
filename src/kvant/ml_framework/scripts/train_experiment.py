@@ -341,6 +341,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--transaction-cost", type=float, default=0.0)
     p.add_argument("--kelly-fraction", type=float, default=0.25)
     p.add_argument("--kelly-payoff-ratio", type=float, default=1.0)
+    p.add_argument(
+        "--fixed-bet-size",
+        type=float,
+        default=1.0,
+        help="Constant bet multiplier used by --no-meta runs. Must be between 0 and 1.",
+    )
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
     p.add_argument(
@@ -411,6 +417,8 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("--meta-accept-threshold must be between 0 and 1.")
     if not (0.0 <= args.primary_confidence_threshold <= 1.0):
         raise SystemExit("--primary-confidence-threshold must be between 0 and 1.")
+    if not (0.0 <= args.fixed_bet_size <= 1.0):
+        raise SystemExit("--fixed-bet-size must be between 0 and 1.")
     if args.kelly_fraction < 0.0:
         raise SystemExit("--kelly-fraction must be non-negative.")
     if args.kelly_payoff_ratio <= 0.0:
@@ -508,6 +516,9 @@ def _save_best_checkpoint_bundle(
             "meta_features": list(args.meta_features),
             "meta_random_state": int(args.seed),
             "meta_accept_threshold": float(args.meta_accept_threshold),
+            "use_meta_selection": bool(not args.no_meta),
+            "bet_sizing": "fixed" if args.no_meta else "kelly",
+            "fixed_bet_size": float(args.fixed_bet_size),
             "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
             "portfolio_initial_cash": float(args.portfolio_initial_cash),
@@ -572,6 +583,9 @@ def _make_logger(
             "meta_model": "logreg",
             "meta_features": list(args.meta_features),
             "meta_accept_threshold": float(args.meta_accept_threshold),
+            "use_meta_selection": bool(not args.no_meta),
+            "bet_sizing": "fixed" if args.no_meta else "kelly",
+            "fixed_bet_size": float(args.fixed_bet_size),
             "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
@@ -684,6 +698,9 @@ def _runtime_metadata(args: argparse.Namespace, *, exp_dir: Path, fold_tag: str 
         "meta_model": "logreg",
         "meta_features": list(args.meta_features),
         "meta_accept_threshold": float(args.meta_accept_threshold),
+        "use_meta_selection": bool(not args.no_meta),
+        "bet_sizing": "fixed" if args.no_meta else "kelly",
+        "fixed_bet_size": float(args.fixed_bet_size),
         "primary_confidence_threshold": float(args.primary_confidence_threshold),
         "transaction_cost": float(args.transaction_cost),
         "kelly_fraction": float(args.kelly_fraction),
@@ -798,6 +815,9 @@ def run_single_fold(
             "meta_model": "logreg",
             "meta_features": list(args.meta_features),
             "meta_accept_threshold": float(args.meta_accept_threshold),
+            "use_meta_selection": bool(not args.no_meta),
+            "bet_sizing": "fixed" if args.no_meta else "kelly",
+            "fixed_bet_size": float(args.fixed_bet_size),
             "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
             "transaction_cost": args.transaction_cost,
@@ -830,6 +850,8 @@ def run_single_fold(
                 meta_features=args.meta_features,
                 meta_random_state=int(args.seed),
                 meta_accept_threshold=float(args.meta_accept_threshold),
+                use_meta_selection=bool(not args.no_meta),
+                fixed_bet_size=float(args.fixed_bet_size),
                 primary_confidence_threshold=float(args.primary_confidence_threshold),
                 initial_portfolio=args.initial_portfolio,
                 portfolio_initial_cash=float(args.portfolio_initial_cash),

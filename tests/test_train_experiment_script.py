@@ -38,6 +38,7 @@ def test_recommended_training_defaults(monkeypatch, tmp_path) -> None:
     assert args.early_stopping_patience is None
     assert args.early_stopping_min_delta == 0.0
     assert args.kelly_fraction == 0.25
+    assert args.fixed_bet_size == 1.0
     assert args.portfolio_max_position_fraction == 0.02
     assert args.meta_accept_threshold == 0.5
     assert args.results_out is None

@@ -72,6 +72,8 @@ def test_train_command_builds_conv1d_threshold_run() -> None:
     assert "--model" in cmd
     assert "conv1d" in cmd
     assert "--no-meta" in cmd
+    assert "--fixed-bet-size" in cmd
+    assert cmd[cmd.index("--fixed-bet-size") + 1] == "1"
     assert "--results-out" in cmd
     assert Path(cmd[cmd.index("--results-out") + 1]).name == "E2-grid-conv1d-w240-tb1-cusum2-nometa.csv"
     assert "--wandb-name" in cmd

@@ -33,10 +33,7 @@ class GridConfig:
     @property
     def label(self) -> str:
         """Return the prepared experiment label produced by prepare_experiment.py."""
-        return (
-            f"sb_L_12_w{int(self.barrier_width)}_h{self.barrier_height_pct:g}_"
-            f"fixedCUSUM{float(self.cusum_h):g}"
-        )
+        return f"sb_L_12_w{int(self.barrier_width)}_h{self.barrier_height_pct:g}_" f"fixedCUSUM{float(self.cusum_h):g}"
 
     @property
     def manifest_path(self) -> Path:
@@ -161,6 +158,7 @@ def train_command(
         cmd.extend(["--meta-accept-threshold", f"{float(run.meta_threshold):g}"])
     elif run.no_meta:
         cmd.append("--no-meta")
+        cmd.extend(["--fixed-bet-size", "1"])
     if float(run.primary_confidence_threshold) > 0.0:
         cmd.extend(["--primary-confidence-threshold", f"{float(run.primary_confidence_threshold):g}"])
     cmd.extend(extra_args)
@@ -232,7 +230,9 @@ def parse_args() -> argparse.Namespace:
             "write-promising-template",
         ),
     )
-    parser.add_argument("--execute", action="store_true", help="Actually run commands. Default only prints/writes them.")
+    parser.add_argument(
+        "--execute", action="store_true", help="Actually run commands. Default only prints/writes them."
+    )
     parser.add_argument("--plan-out", type=Path, default=Path("artifacts/run_debug/experiment_grid_plan.json"))
     parser.add_argument("--start-index", type=int, default=0, help="Skip commands before this zero-based index.")
     parser.add_argument("--max-runs", type=int, default=None, help="Limit how many commands are printed or executed.")
@@ -269,9 +269,7 @@ def main() -> None:
 
     if args.mode in {"plan", "prepare"}:
         prepare_commands = [
-            prepare_command(config)
-            for config in configs
-            if args.force_prepare or not config.manifest_path.exists()
+            prepare_command(config) for config in configs if args.force_prepare or not config.manifest_path.exists()
         ]
         if args.mode == "prepare":
             commands = prepare_commands

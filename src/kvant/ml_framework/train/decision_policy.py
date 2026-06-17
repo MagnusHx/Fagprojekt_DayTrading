@@ -194,6 +194,25 @@ def sized_trade_decisions(
     return y_trade, bet_size * accepted.astype(np.float64), signed_bet_size
 
 
+def fixed_size_trade_decisions(
+    *,
+    side_pred: np.ndarray,
+    bet_size: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Turn side predictions into trade labels with a constant bet size."""
+    if not (0.0 <= float(bet_size) <= 1.0):
+        raise ValueError("bet_size must be between 0 and 1.")
+
+    side_pred = np.asarray(side_pred, dtype=np.int64)
+    y_trade = side_labels_to_trade_labels(side_pred)
+    accepted = y_trade != LABEL_EXIT
+    sizes = np.full(len(y_trade), float(bet_size), dtype=np.float64) * accepted.astype(np.float64)
+    signed_bet_size = np.zeros(len(sizes), dtype=np.float64)
+    signed_bet_size[y_trade == LABEL_UP] = sizes[y_trade == LABEL_UP]
+    signed_bet_size[y_trade == LABEL_DOWN] = -sizes[y_trade == LABEL_DOWN]
+    return y_trade, sizes, signed_bet_size
+
+
 @dataclass
 class LogisticMetaLabeler:
     feature_tokens: tuple[str, ...] = DEFAULT_META_FEATURES

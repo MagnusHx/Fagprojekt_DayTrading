@@ -29,6 +29,10 @@ wandb sync wandb/offline-run-*
 Important: `results/` is ignored by Git. Generated CSV files must be shared manually with the person doing final
 aggregation.
 
+Protocol note: no-meta timebar, density-matched timebar, CUSUM/TB grid, ResNet no-meta, and confidence-sweep runs use
+fixed bet size `1.0`. Kelly sizing is reserved for meta-selection runs, so the main timebar-vs-CUSUM comparison is not
+affected by position-size differences.
+
 ## Phase 1: Person 1 Runs The Full Grid
 
 Person 1 owns the full grid workflow from data preparation to best-config selection.
@@ -49,6 +53,7 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --wandb-name E1-timebar-conv1d-nometa \
   --transaction-cost 0.001 \
   --no-meta \
+  --fixed-bet-size 1.0 \
   --results-out results/main/E1_timebar_conv1d_nometa.csv
 ```
 
@@ -148,6 +153,7 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --wandb-name E2-timebar-density-matched-nextbar \
   --transaction-cost 0.001 \
   --no-meta \
+  --fixed-bet-size 1.0 \
   --results-out results/main/E2_timebar_density_matched_nextbar.csv
 ```
 

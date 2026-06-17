@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader, Dataset
 from kvant.labels import LABEL_DOWN, LABEL_EXIT, LABEL_UP
 from kvant.ml_framework.train.decision_policy import (
     LogisticMetaLabeler,
+    fixed_size_trade_decisions,
     kelly_bet_fraction,
     meta_targets_from_predictions,
     sized_trade_decisions,
@@ -338,6 +339,17 @@ def test_sized_trade_decisions_gate_on_threshold_and_kelly_edge() -> None:
     np.testing.assert_allclose(signed_bet_size, np.asarray([-0.6, 0.1, 0.0], dtype=np.float64))
 
 
+def test_fixed_size_trade_decisions_accept_all_primary_signals() -> None:
+    y_trade, bet_size, signed_bet_size = fixed_size_trade_decisions(
+        side_pred=np.asarray([0, 1, 1], dtype=np.int64),
+        bet_size=1.0,
+    )
+
+    np.testing.assert_array_equal(y_trade, np.asarray([LABEL_DOWN, LABEL_UP, LABEL_UP], dtype=np.int64))
+    np.testing.assert_allclose(bet_size, np.asarray([1.0, 1.0, 1.0], dtype=np.float64))
+    np.testing.assert_allclose(signed_bet_size, np.asarray([-1.0, 1.0, 1.0], dtype=np.float64))
+
+
 def test_evaluator_fits_meta_labeler_and_reports_combined_metrics() -> None:
     train_loader = DataLoader(
         _PredictionDataset(y_true=[0, 1, -1, 0], tids=[0, 0, 0, 0], tpos=[0, 1, 2, 3]),
@@ -404,3 +416,39 @@ def test_evaluator_fits_meta_labeler_and_reports_combined_metrics() -> None:
     assert best_metrics["test/paper/n_executed_trades"] >= 0
     assert "_portfolio_curves" in best_metrics
     assert not any(key.startswith("train/") for key in best_metrics)
+
+
+def test_evaluator_no_meta_uses_fixed_bet_size_without_train_loader() -> None:
+    val_loader = DataLoader(
+        _PredictionDataset(y_true=[0, 1], tids=[0, 0], tpos=[0, 1]),
+        batch_size=2,
+    )
+    model = _IndexLogitFeatureModel(
+        logits=[
+            [3.0, 0.1],
+            [0.1, 3.0],
+        ]
+    )
+    store = _FakeStore(
+        tickers_all=["AAA"],
+        labels=[0, 2],
+        pnl=[-0.05, 0.05],
+    )
+    evaluator = ExperimentEvaluator(
+        store=store,
+        device=torch.device("cpu"),
+        cfg=EvalConfig(
+            compute_profit_stats=False,
+            compute_paper_trading_metrics=False,
+            compute_portfolio_metrics=False,
+            use_meta_selection=False,
+            fixed_bet_size=1.0,
+            labels=(0, 1),
+        ),
+    )
+
+    metrics = evaluator.evaluate_all(model, {"val": val_loader}, step=1)
+
+    assert metrics["val/meta/take_rate"] == 1.0
+    assert metrics["val/decision/trade_signal_rate"] == 1.0
+    assert metrics["val/execution/n_trade_signals_raw"] == 2

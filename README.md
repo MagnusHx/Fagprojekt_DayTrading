@@ -144,6 +144,7 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --wandb-name E1-timebar-conv1d-nometa \
   --transaction-cost 0.001 \
   --no-meta \
+  --fixed-bet-size 1.0 \
   --results-out results/main/E1_timebar_conv1d_nometa.csv
 ```
 
@@ -154,6 +155,8 @@ results/main/E1_timebar_conv1d_nometa.csv
 ```
 
 ## Step 4: Train The CUSUM/TB Conv1D Grid
+
+No-meta grid runs use fixed bet size `1.0`, so the time-bar/CUSUM comparison is not affected by Kelly sizing.
 
 First print/write the command plan:
 
@@ -321,6 +324,7 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --wandb-name E2-timebar-density-matched-nextbar \
   --transaction-cost 0.001 \
   --no-meta \
+  --fixed-bet-size 1.0 \
   --results-out results/main/E2_timebar_density_matched_nextbar.csv
 ```
 
@@ -587,6 +591,14 @@ Model dropout defaults to `0.3`. Early stopping is available but not enabled unl
 ```bash
 --early-stopping-patience 5
 ```
+
+For `--no-meta` runs, the evaluator skips meta-selection and uses fixed-size trades. The default is:
+
+```bash
+--fixed-bet-size 1.0
+```
+
+Kelly sizing is only used for runs with meta-selection enabled.
 
 ## Report Outputs To Use
 

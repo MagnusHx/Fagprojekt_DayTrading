@@ -21,6 +21,7 @@ from .classification_metrics import classification_metrics
 from .decision_policy import (
     DEFAULT_META_FEATURES,
     LogisticMetaLabeler,
+    fixed_size_trade_decisions,
     meta_targets_from_predictions,
     normalize_meta_features,
     sized_trade_decisions,
@@ -78,6 +79,8 @@ class EvalConfig:
     meta_features: tuple[str, ...] = DEFAULT_META_FEATURES
     meta_random_state: int = 1337
     meta_accept_threshold: float = 0.5
+    use_meta_selection: bool = True
+    fixed_bet_size: float = 1.0
     primary_confidence_threshold: float = 0.0
     kelly_fraction: float = 0.25
     kelly_payoff_ratio: float = 1.0
@@ -105,6 +108,8 @@ class ExperimentEvaluator:
             raise RuntimeError(f"Unsupported meta_model={self.cfg.meta_model!r}.")
         if not (0.0 <= float(self.cfg.meta_accept_threshold) <= 1.0):
             raise RuntimeError("meta_accept_threshold must be between 0 and 1.")
+        if not (0.0 <= float(self.cfg.fixed_bet_size) <= 1.0):
+            raise RuntimeError("fixed_bet_size must be between 0 and 1.")
         if not (0.0 <= float(self.cfg.primary_confidence_threshold) <= 1.0):
             raise RuntimeError("primary_confidence_threshold must be between 0 and 1.")
         if float(self.cfg.kelly_fraction) < 0.0:
@@ -170,13 +175,19 @@ class ExperimentEvaluator:
         event_true = self._event_labels_for_pred_out(pred_out)
         meta_true = meta_targets_from_predictions(pred_out=pred_out, store=self.store)
         meta_pred = (np.asarray(take_proba, dtype=np.float64) >= float(self.cfg.meta_accept_threshold)).astype(np.int64)
-        y_trade, bet_size, _signed_bet_size = sized_trade_decisions(
-            side_pred=side_pred,
-            take_proba=take_proba,
-            accept_threshold=float(self.cfg.meta_accept_threshold),
-            payoff_ratio=float(self.cfg.kelly_payoff_ratio),
-            fraction=float(self.cfg.kelly_fraction),
-        )
+        if self.cfg.use_meta_selection:
+            y_trade, bet_size, _signed_bet_size = sized_trade_decisions(
+                side_pred=side_pred,
+                take_proba=take_proba,
+                accept_threshold=float(self.cfg.meta_accept_threshold),
+                payoff_ratio=float(self.cfg.kelly_payoff_ratio),
+                fraction=float(self.cfg.kelly_fraction),
+            )
+        else:
+            y_trade, bet_size, _signed_bet_size = fixed_size_trade_decisions(
+                side_pred=side_pred,
+                bet_size=float(self.cfg.fixed_bet_size),
+            )
         if float(self.cfg.primary_confidence_threshold) > 0.0:
             confidence = np.asarray(pred_out["y_pred_confidence"], dtype=np.float64)
             if len(confidence) != len(y_trade):
@@ -383,8 +394,11 @@ class ExperimentEvaluator:
         detailed: bool = True,
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], np.ndarray, Optional[Dict[str, Any]]]:
         pred_out = predict(model, loader, self.device)
-        meta_model = self._fit_meta_model(pred_out)
-        take_proba = meta_model.predict_take_proba(pred_out=pred_out, store=self.store)
+        if self.cfg.use_meta_selection:
+            meta_model = self._fit_meta_model(pred_out)
+            take_proba = meta_model.predict_take_proba(pred_out=pred_out, store=self.store)
+        else:
+            take_proba = np.ones(len(pred_out["tid"]), dtype=np.float64)
         return self._evaluate_pred_out(split, pred_out, step=step, take_proba=take_proba, detailed=detailed)
 
     def evaluate_all(
@@ -396,7 +410,9 @@ class ExperimentEvaluator:
         metric_splits: tuple[str, ...] = ("val",),
         detailed: bool = False,
     ) -> Dict[str, Any]:
-        if "train" not in loaders or loaders["train"] is None or len(loaders["train"].dataset) == 0:
+        if self.cfg.use_meta_selection and (
+            "train" not in loaders or loaders["train"] is None or len(loaders["train"].dataset) == 0
+        ):
             raise RuntimeError("Meta-label evaluation requires a non-empty train loader for fitting the meta model.")
 
         pred_out_by_split: Dict[str, Dict[str, Any]] = {}
@@ -411,7 +427,7 @@ class ExperimentEvaluator:
             pred_out_by_split[split] = predict(model, loader, self.device)
             print(f"eval: predicted {split} split in {time.time() - started_at:.1f}s", flush=True)
 
-        meta_model = self._fit_meta_model(pred_out_by_split["train"])
+        meta_model = self._fit_meta_model(pred_out_by_split["train"]) if self.cfg.use_meta_selection else None
 
         all_metrics: Dict[str, Any] = {}
         confusion_counts: Dict[str, np.ndarray] = {}
@@ -425,7 +441,11 @@ class ExperimentEvaluator:
                 continue
             started_at = time.time()
             print(f"eval: scoring {split} split ({len(pred_out['tid'])} rows)...", flush=True)
-            take_proba = meta_model.predict_take_proba(pred_out=pred_out, store=self.store)
+            take_proba = (
+                meta_model.predict_take_proba(pred_out=pred_out, store=self.store)
+                if meta_model is not None
+                else np.ones(len(pred_out["tid"]), dtype=np.float64)
+            )
             metrics, rows, cm, profit_curve = self._evaluate_pred_out(
                 split,
                 pred_out,
