@@ -241,7 +241,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-runs", type=int, default=None, help="Limit how many commands are printed or executed.")
     parser.add_argument("--conv1d-epochs", type=int, default=20)
     parser.add_argument("--resnet-epochs", type=int, default=30)
-    parser.add_argument("--transaction-cost", type=float, default=0.001)
+    parser.add_argument("--transaction-cost", type=float, default=0.0)
     parser.add_argument("--wandb-project", type=str, default=DEFAULT_WANDB_PROJECT)
     parser.add_argument("--wandb-entity", type=str, default=DEFAULT_WANDB_ENTITY)
     parser.add_argument("--promising-configs", type=Path, default=PROMISING_TEMPLATE)

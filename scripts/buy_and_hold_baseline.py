@@ -35,7 +35,9 @@ def _max_drawdown_pct(equity: pd.Series) -> float:
     return float(drawdown.max(skipna=True) * 100.0)
 
 
-def _annualized_return_pct(total_return: float, first_ts: pd.Timestamp, last_ts: pd.Timestamp, days_per_year: float) -> float:
+def _annualized_return_pct(
+    total_return: float, first_ts: pd.Timestamp, last_ts: pd.Timestamp, days_per_year: float
+) -> float:
     """Annualize total return over a timestamp interval."""
     days = max((last_ts - first_ts).total_seconds() / 86400.0, 1e-9)
     return float(((1.0 + total_return) ** (float(days_per_year) / days) - 1.0) * 100.0)
@@ -163,12 +165,14 @@ def _log_summary(rows: list[dict[str, float | int | str]]) -> None:
         ci_lower, ci_upper = calculate_ci(values)
         mean = float(np.mean(values))
         std = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
-        wandb.log({
-            f"{metric}/mean": mean,
-            f"{metric}/std": std,
-            f"{metric}/ci_lower": ci_lower,
-            f"{metric}/ci_upper": ci_upper,
-        })
+        wandb.log(
+            {
+                f"{metric}/mean": mean,
+                f"{metric}/std": std,
+                f"{metric}/ci_lower": ci_lower,
+                f"{metric}/ci_upper": ci_upper,
+            }
+        )
         print(f"{metric}: {mean:.4f} [{ci_lower:.4f}, {ci_upper:.4f}]")
 
 
@@ -176,7 +180,7 @@ def main() -> None:
     """Run the buy-and-hold baseline CLI."""
     parser = argparse.ArgumentParser(description="Run equal-weight buy-and-hold on prepared CV folds.")
     parser.add_argument("--cv-manifest", type=Path, required=True)
-    parser.add_argument("--transaction-cost", type=float, default=0.001)
+    parser.add_argument("--transaction-cost", type=float, default=0.0)
     parser.add_argument("--risk-free-rate", type=float, default=0.0314)
     parser.add_argument("--days-per-year", type=float, default=365.0)
     parser.add_argument("--wandb-project", type=str, default=DEFAULT_WANDB_PROJECT)

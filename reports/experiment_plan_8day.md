@@ -25,7 +25,7 @@ W&B runs aligned.
 | CUSUM thresholds | 1%, 2%, 3% |
 | Triple-barrier heights | 1%, 2%, 4%, 6% |
 | Vertical barrier width | 240 minutes |
-| Transaction cost | 0.001 |
+| Transaction cost | 0 |
 | Random seed | 1337 |
 
 All parameters not being tested are frozen.
