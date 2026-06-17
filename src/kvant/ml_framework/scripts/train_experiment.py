@@ -339,13 +339,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--portfolio-max-total-exposure", type=float, default=1.0)
     p.add_argument("--portfolio-max-positions", type=int, default=10)
     p.add_argument("--transaction-cost", type=float, default=0.0)
+    p.add_argument(
+        "--bet-sizing",
+        choices=("fixed", "kelly"),
+        default="fixed",
+        help="Position sizing rule. Use fixed for primary/meta selection experiments; reserve kelly for a sizing ablation.",
+    )
     p.add_argument("--kelly-fraction", type=float, default=0.25)
     p.add_argument("--kelly-payoff-ratio", type=float, default=1.0)
     p.add_argument(
         "--fixed-bet-size",
         type=float,
         default=1.0,
-        help="Constant bet multiplier used by --no-meta runs. Must be between 0 and 1.",
+        help="Constant bet multiplier used by fixed bet sizing. Must be between 0 and 1.",
     )
     p.add_argument("--risk-free-rate", type=float, default=0.0314)
     p.add_argument("--days-per-year", type=float, default=365.0)
@@ -517,7 +523,7 @@ def _save_best_checkpoint_bundle(
             "meta_random_state": int(args.seed),
             "meta_accept_threshold": float(args.meta_accept_threshold),
             "use_meta_selection": bool(not args.no_meta),
-            "bet_sizing": "fixed" if args.no_meta else "kelly",
+            "bet_sizing": str(args.bet_sizing),
             "fixed_bet_size": float(args.fixed_bet_size),
             "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
@@ -584,7 +590,7 @@ def _make_logger(
             "meta_features": list(args.meta_features),
             "meta_accept_threshold": float(args.meta_accept_threshold),
             "use_meta_selection": bool(not args.no_meta),
-            "bet_sizing": "fixed" if args.no_meta else "kelly",
+            "bet_sizing": str(args.bet_sizing),
             "fixed_bet_size": float(args.fixed_bet_size),
             "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
@@ -699,7 +705,7 @@ def _runtime_metadata(args: argparse.Namespace, *, exp_dir: Path, fold_tag: str 
         "meta_features": list(args.meta_features),
         "meta_accept_threshold": float(args.meta_accept_threshold),
         "use_meta_selection": bool(not args.no_meta),
-        "bet_sizing": "fixed" if args.no_meta else "kelly",
+        "bet_sizing": str(args.bet_sizing),
         "fixed_bet_size": float(args.fixed_bet_size),
         "primary_confidence_threshold": float(args.primary_confidence_threshold),
         "transaction_cost": float(args.transaction_cost),
@@ -816,7 +822,7 @@ def run_single_fold(
             "meta_features": list(args.meta_features),
             "meta_accept_threshold": float(args.meta_accept_threshold),
             "use_meta_selection": bool(not args.no_meta),
-            "bet_sizing": "fixed" if args.no_meta else "kelly",
+            "bet_sizing": str(args.bet_sizing),
             "fixed_bet_size": float(args.fixed_bet_size),
             "primary_confidence_threshold": float(args.primary_confidence_threshold),
             "initial_portfolio": args.initial_portfolio,
@@ -851,6 +857,7 @@ def run_single_fold(
                 meta_random_state=int(args.seed),
                 meta_accept_threshold=float(args.meta_accept_threshold),
                 use_meta_selection=bool(not args.no_meta),
+                bet_sizing=str(args.bet_sizing),
                 fixed_bet_size=float(args.fixed_bet_size),
                 primary_confidence_threshold=float(args.primary_confidence_threshold),
                 initial_portfolio=args.initial_portfolio,

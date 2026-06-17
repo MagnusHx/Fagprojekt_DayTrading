@@ -350,6 +350,19 @@ def test_fixed_size_trade_decisions_accept_all_primary_signals() -> None:
     np.testing.assert_allclose(signed_bet_size, np.asarray([-1.0, 1.0, 1.0], dtype=np.float64))
 
 
+def test_fixed_size_trade_decisions_can_gate_on_meta_threshold_without_kelly_sizing() -> None:
+    y_trade, bet_size, signed_bet_size = fixed_size_trade_decisions(
+        side_pred=np.asarray([0, 1, 1], dtype=np.int64),
+        take_proba=np.asarray([0.80, 0.55, 0.49], dtype=np.float64),
+        accept_threshold=0.5,
+        bet_size=1.0,
+    )
+
+    np.testing.assert_array_equal(y_trade, np.asarray([LABEL_DOWN, LABEL_UP, LABEL_EXIT], dtype=np.int64))
+    np.testing.assert_allclose(bet_size, np.asarray([1.0, 1.0, 0.0], dtype=np.float64))
+    np.testing.assert_allclose(signed_bet_size, np.asarray([-1.0, 1.0, 0.0], dtype=np.float64))
+
+
 def test_evaluator_fits_meta_labeler_and_reports_combined_metrics() -> None:
     train_loader = DataLoader(
         _PredictionDataset(y_true=[0, 1, -1, 0], tids=[0, 0, 0, 0], tpos=[0, 1, 2, 3]),

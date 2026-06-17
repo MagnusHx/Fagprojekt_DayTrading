@@ -71,6 +71,8 @@ def test_train_command_builds_conv1d_threshold_run() -> None:
     assert Path(manifest_arg).name == "sb_L_12_w240_h1_fixedCUSUM0.02_cv_manifest.json"
     assert "--model" in cmd
     assert "conv1d" in cmd
+    assert "--bet-sizing" in cmd
+    assert cmd[cmd.index("--bet-sizing") + 1] == "fixed"
     assert "--no-meta" in cmd
     assert "--fixed-bet-size" in cmd
     assert cmd[cmd.index("--fixed-bet-size") + 1] == "1"

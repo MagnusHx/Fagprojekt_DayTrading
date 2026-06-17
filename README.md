@@ -143,6 +143,7 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --wandb-project day-trading-experiments \
   --wandb-name E1-timebar-conv1d-nometa \
   --transaction-cost 0.001 \
+  --bet-sizing fixed \
   --no-meta \
   --fixed-bet-size 1.0 \
   --results-out results/main/E1_timebar_conv1d_nometa.csv
@@ -156,7 +157,8 @@ results/main/E1_timebar_conv1d_nometa.csv
 
 ## Step 4: Train The CUSUM/TB Conv1D Grid
 
-No-meta grid runs use fixed bet size `1.0`, so the time-bar/CUSUM comparison is not affected by Kelly sizing.
+Grid runs use fixed bet size `1.0`, so the time-bar/CUSUM and meta-selection comparisons are not affected by Kelly
+sizing. Kelly is reserved for a later explicit sizing ablation.
 
 First print/write the command plan:
 
@@ -323,6 +325,7 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
   --wandb-project day-trading-experiments \
   --wandb-name E2-timebar-density-matched-nextbar \
   --transaction-cost 0.001 \
+  --bet-sizing fixed \
   --no-meta \
   --fixed-bet-size 1.0 \
   --results-out results/main/E2_timebar_density_matched_nextbar.csv
@@ -470,7 +473,7 @@ ls $BEST_CONFIDENCE_GLOB
 
 ## Step 16: Run Meta-Selection Sweep
 
-This tests RQ4.
+This tests RQ4 with fixed bet size `1.0`; it isolates whether the meta-model improves TAKE/PASS selection.
 
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-meta \
@@ -592,13 +595,19 @@ Model dropout defaults to `0.3`. Early stopping is available but not enabled unl
 --early-stopping-patience 5
 ```
 
-For `--no-meta` runs, the evaluator skips meta-selection and uses fixed-size trades. The default is:
+Fixed position sizing is the default for both no-meta and meta-selection runs:
 
 ```bash
+--bet-sizing fixed
 --fixed-bet-size 1.0
 ```
 
-Kelly sizing is only used for runs with meta-selection enabled.
+This keeps the primary research comparisons focused on sampling, labelling, and selection. Use Kelly only for a later
+explicit sizing ablation:
+
+```bash
+--bet-sizing kelly
+```
 
 ## Report Outputs To Use
 

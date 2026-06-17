@@ -197,16 +197,28 @@ def sized_trade_decisions(
 def fixed_size_trade_decisions(
     *,
     side_pred: np.ndarray,
+    take_proba: np.ndarray | None = None,
+    accept_threshold: float = 0.0,
     bet_size: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Turn side predictions into trade labels with a constant bet size."""
+    if not (0.0 <= float(accept_threshold) <= 1.0):
+        raise ValueError("accept_threshold must be between 0 and 1.")
     if not (0.0 <= float(bet_size) <= 1.0):
         raise ValueError("bet_size must be between 0 and 1.")
 
     side_pred = np.asarray(side_pred, dtype=np.int64)
+    if take_proba is None:
+        take_proba = np.ones(len(side_pred), dtype=np.float64)
+    else:
+        take_proba = np.asarray(take_proba, dtype=np.float64)
+    if len(side_pred) != len(take_proba):
+        raise ValueError(f"side_pred and take_proba must align, got {len(side_pred)} and {len(take_proba)}.")
+
     y_trade = side_labels_to_trade_labels(side_pred)
-    accepted = y_trade != LABEL_EXIT
+    accepted = (take_proba >= float(accept_threshold)) & (y_trade != LABEL_EXIT)
     sizes = np.full(len(y_trade), float(bet_size), dtype=np.float64) * accepted.astype(np.float64)
+    y_trade = np.where(accepted, y_trade, LABEL_EXIT).astype(np.int64, copy=False)
     signed_bet_size = np.zeros(len(sizes), dtype=np.float64)
     signed_bet_size[y_trade == LABEL_UP] = sizes[y_trade == LABEL_UP]
     signed_bet_size[y_trade == LABEL_DOWN] = -sizes[y_trade == LABEL_DOWN]

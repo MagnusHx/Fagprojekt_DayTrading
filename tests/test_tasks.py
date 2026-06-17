@@ -34,7 +34,9 @@ def test_shared_training_preset_command_uses_expected_core_settings(
     assert f"--epochs {epochs}" in command
     assert "--lr 0.001" in command
     assert "--full-eval-every 3" in command
-    assert "--kelly-fraction 0.25" in command
+    assert "--bet-sizing fixed" in command
+    assert "--fixed-bet-size 1" in command
+    assert "--kelly-fraction" not in command
     assert "--portfolio-max-position-fraction 0.02" in command
     assert f"--transaction-cost {transaction_cost}" in command
     assert "--cv-manifest prepared/cv.json" in command

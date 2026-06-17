@@ -80,6 +80,7 @@ class EvalConfig:
     meta_random_state: int = 1337
     meta_accept_threshold: float = 0.5
     use_meta_selection: bool = True
+    bet_sizing: str = "fixed"
     fixed_bet_size: float = 1.0
     primary_confidence_threshold: float = 0.0
     kelly_fraction: float = 0.25
@@ -106,6 +107,8 @@ class ExperimentEvaluator:
         self.logger = logger
         if self.cfg.meta_model != "logreg":
             raise RuntimeError(f"Unsupported meta_model={self.cfg.meta_model!r}.")
+        if self.cfg.bet_sizing not in {"fixed", "kelly"}:
+            raise RuntimeError(f"Unsupported bet_sizing={self.cfg.bet_sizing!r}.")
         if not (0.0 <= float(self.cfg.meta_accept_threshold) <= 1.0):
             raise RuntimeError("meta_accept_threshold must be between 0 and 1.")
         if not (0.0 <= float(self.cfg.fixed_bet_size) <= 1.0):
@@ -175,17 +178,20 @@ class ExperimentEvaluator:
         event_true = self._event_labels_for_pred_out(pred_out)
         meta_true = meta_targets_from_predictions(pred_out=pred_out, store=self.store)
         meta_pred = (np.asarray(take_proba, dtype=np.float64) >= float(self.cfg.meta_accept_threshold)).astype(np.int64)
-        if self.cfg.use_meta_selection:
+        accept_threshold = float(self.cfg.meta_accept_threshold) if self.cfg.use_meta_selection else 0.0
+        if self.cfg.bet_sizing == "kelly":
             y_trade, bet_size, _signed_bet_size = sized_trade_decisions(
                 side_pred=side_pred,
                 take_proba=take_proba,
-                accept_threshold=float(self.cfg.meta_accept_threshold),
+                accept_threshold=accept_threshold,
                 payoff_ratio=float(self.cfg.kelly_payoff_ratio),
                 fraction=float(self.cfg.kelly_fraction),
             )
         else:
             y_trade, bet_size, _signed_bet_size = fixed_size_trade_decisions(
                 side_pred=side_pred,
+                take_proba=take_proba,
+                accept_threshold=accept_threshold,
                 bet_size=float(self.cfg.fixed_bet_size),
             )
         if float(self.cfg.primary_confidence_threshold) > 0.0:

@@ -143,6 +143,10 @@ def train_command(
         str(int(epochs)),
         "--transaction-cost",
         f"{float(transaction_cost):g}",
+        "--bet-sizing",
+        "fixed",
+        "--fixed-bet-size",
+        "1",
         "--wandb-project",
         wandb_project,
         "--wandb-entity",
@@ -158,7 +162,6 @@ def train_command(
         cmd.extend(["--meta-accept-threshold", f"{float(run.meta_threshold):g}"])
     elif run.no_meta:
         cmd.append("--no-meta")
-        cmd.extend(["--fixed-bet-size", "1"])
     if float(run.primary_confidence_threshold) > 0.0:
         cmd.extend(["--primary-confidence-threshold", f"{float(run.primary_confidence_threshold):g}"])
     cmd.extend(extra_args)
