@@ -1,0 +1,4 @@
+setup,manifest,folds,train_samples,val_samples,test_samples,total_samples,first_timestamp,last_timestamp
+Timebar15m,src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json,5,1355783,333022,334168,2022973,2020-01-02T12:00:00,2022-06-30T23:45:00
+BestCUSUMTB,src/kvant/ml_framework/prepared/sb_L_12_w240_h2_fixedCUSUM0.01_cv_manifest.json,5,138275,31044,34930,204249,2020-01-02T14:39:00,2022-06-30T19:28:00
+DensityMatchedNextBar,src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json,5,372644,92155,92488,557287,2020-01-02T21:00:00,2022-06-30T23:33:00
