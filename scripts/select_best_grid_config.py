@@ -68,8 +68,10 @@ def _write_env(path: Path, selected: dict[str, float | str | int]) -> None:
     tb_pct = float(selected["barrier_height_pct"])
     cusum_pct = float(selected["cusum_h_pct"])
     resnet_run = f"E2-grid-resnet_lstm-w{width}-tb{tb_pct:g}-cusum{cusum_pct:g}-nometa"
-    confidence_glob = f"results/grid_search/E2-grid-conv1d-w{width}-tb{tb_pct:g}-cusum{cusum_pct:g}-nometa-ct*.csv"
-    meta_glob = f"results/grid_search/E2-grid-conv1d-w{width}-tb{tb_pct:g}-cusum{cusum_pct:g}-mt*.csv"
+    confidence_glob = (
+        f"results/grid_search/E2-grid-resnet_lstm-w{width}-tb{tb_pct:g}-cusum{cusum_pct:g}-nometa-ct*.csv"
+    )
+    meta_glob = f"results/grid_search/E2-grid-resnet_lstm-w{width}-tb{tb_pct:g}-cusum{cusum_pct:g}-mt*.csv"
     lines = [
         f"export BEST_GRID_RUN='{selected['run_name']}'",
         f"export BEST_GRID_RESULT='{selected['result_path']}'",

@@ -15,16 +15,14 @@ transfers to intraday U.S. equities.
 
 ## Research Questions
 
-```text
-RQ1: How does a reference-inspired machine learning trading pipeline perform when applied to intraday U.S. equities?
-
-RQ2: Does CUSUM sampling with triple-barrier labelling improve primary-model predictive performance compared with a
-     time-based baseline?
-
-RQ3: Does confidence-based selective trading improve the quality and risk-adjusted performance of executed trades?
-
-RQ4: Does a learned meta-selection model improve trade selection beyond the primary model's own confidence?
-```
+1. Is it possible to translate the methods and pipeline used in the paper *Algorithmic crypto trading using
+   information-driven bars, triple barrier labeling and deep learning* to a set of financial instruments, i.e. intraday
+   U.S. equities?
+2. Does a CUSUM-based event sampling and triple-barrier labeling framework improve predictive and economic performance
+   over a non-information-driven intraday stock trading baseline?
+3. Does selective trading, where trades are only executed when the primary model's prediction confidence is sufficiently
+   high, improve risk-adjusted returns?
+4. Can a learned meta-labeling model improve trade selection beyond the primary model's own confidence?
 
 ## Fixed Configuration
 
@@ -471,8 +469,8 @@ uv run python scripts/compare_experiments.py \
 
 ## Step 15: Run Confidence-Based Selective Trading Sweep
 
-This tests RQ3. These runs introduce a decision threshold, so they can use decision and portfolio metrics in addition
-to classification metrics.
+This tests RQ3 on the selected CUSUM/TB setup using the ResNet-LSTM architecture from Step 13. These runs introduce a
+decision threshold, so they can use decision and portfolio metrics in addition to classification metrics.
 
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-confidence \
@@ -490,8 +488,9 @@ ls $BEST_CONFIDENCE_GLOB
 
 ## Step 16: Run Meta-Selection Sweep
 
-This tests RQ4 with fixed bet size `1.0`; it isolates whether the meta-model improves TAKE/PASS selection.
-For meta-selection, report take rate, meta F1, acted directional accuracy, executed trade count, and portfolio metrics.
+This tests RQ4 on the selected CUSUM/TB setup using the ResNet-LSTM architecture from Step 13. It isolates whether the
+meta-model improves TAKE/PASS selection. For meta-selection, report take rate, meta F1, acted directional accuracy,
+executed trade count, and portfolio metrics.
 
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-meta \

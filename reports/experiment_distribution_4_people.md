@@ -247,7 +247,10 @@ echo "$BEST_RESNET_RESULT"
 
 The printed CSV path should exist locally and must be shared for final aggregation.
 
-### Person 4: Confidence Sweep And Meta-Selection Sweep
+### Person 4: ResNet-LSTM Confidence Sweep And Meta-Selection Sweep
+
+These sweeps use the selected CUSUM/TB setup with the ResNet-LSTM architecture, so Person 3's no-meta ResNet-LSTM run is
+the direct baseline.
 
 These sweeps use fixed bet size `1.0`; the meta-selection sweep tests TAKE/PASS filtering, not Kelly sizing.
 For these sweeps, decision and portfolio metrics are part of the main interpretation because the policy now chooses

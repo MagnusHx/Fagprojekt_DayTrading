@@ -320,11 +320,11 @@ def main() -> None:
             train_command(
                 GridRun(
                     config=config,
-                    model="conv1d",
+                    model="resnet_lstm",
                     no_meta=True,
                     primary_confidence_threshold=threshold,
                 ),
-                epochs=args.conv1d_epochs,
+                epochs=args.resnet_epochs,
                 transaction_cost=args.transaction_cost,
                 wandb_project=args.wandb_project,
                 wandb_entity=args.wandb_entity,
@@ -337,8 +337,8 @@ def main() -> None:
         configs = load_promising_configs(args.promising_configs)
         commands = [
             train_command(
-                GridRun(config=config, model="conv1d", no_meta=False, meta_threshold=threshold),
-                epochs=args.conv1d_epochs,
+                GridRun(config=config, model="resnet_lstm", no_meta=False, meta_threshold=threshold),
+                epochs=args.resnet_epochs,
                 transaction_cost=args.transaction_cost,
                 wandb_project=args.wandb_project,
                 wandb_entity=args.wandb_entity,

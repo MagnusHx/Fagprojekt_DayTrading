@@ -87,3 +87,52 @@ def test_train_command_builds_conv1d_threshold_run() -> None:
     assert "--transaction-cost" in cmd
     assert cmd[cmd.index("--transaction-cost") + 1] == "0"
     assert "--no-save-best-checkpoint" in cmd
+
+
+def test_train_command_builds_resnet_confidence_run() -> None:
+    """Confidence sweep runs should be distinguishable from the no-meta ResNet baseline."""
+    config = GridConfig(cusum_h=0.01, barrier_height=0.02, barrier_width=240)
+    run = GridRun(
+        config=config,
+        model="resnet_lstm",
+        no_meta=True,
+        primary_confidence_threshold=0.55,
+    )
+
+    cmd = train_command(
+        run,
+        epochs=30,
+        transaction_cost=0.001,
+        wandb_project="day-trading-experiments",
+        wandb_entity="team-entity",
+    )
+
+    assert cmd[cmd.index("--model") + 1] == "resnet_lstm"
+    assert cmd[cmd.index("--epochs") + 1] == "30"
+    assert "--no-meta" in cmd
+    assert "--primary-confidence-threshold" in cmd
+    assert cmd[cmd.index("--primary-confidence-threshold") + 1] == "0.55"
+    assert Path(cmd[cmd.index("--results-out") + 1]).name == (
+        "E2-grid-resnet_lstm-w240-tb2-cusum1-nometa-ct0p55.csv"
+    )
+
+
+def test_train_command_builds_resnet_meta_run() -> None:
+    """Meta sweep runs should use the selected ResNet-LSTM architecture."""
+    config = GridConfig(cusum_h=0.01, barrier_height=0.02, barrier_width=240)
+    run = GridRun(config=config, model="resnet_lstm", no_meta=False, meta_threshold=0.6)
+
+    cmd = train_command(
+        run,
+        epochs=30,
+        transaction_cost=0.001,
+        wandb_project="day-trading-experiments",
+        wandb_entity="team-entity",
+    )
+
+    assert cmd[cmd.index("--model") + 1] == "resnet_lstm"
+    assert cmd[cmd.index("--epochs") + 1] == "30"
+    assert "--no-meta" not in cmd
+    assert "--meta-accept-threshold" in cmd
+    assert cmd[cmd.index("--meta-accept-threshold") + 1] == "0.6"
+    assert Path(cmd[cmd.index("--results-out") + 1]).name == "E2-grid-resnet_lstm-w240-tb2-cusum1-mt0p6.csv"
