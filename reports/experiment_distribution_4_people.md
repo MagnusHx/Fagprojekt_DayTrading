@@ -178,6 +178,10 @@ src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.j
 
 ### Person 2: Simple Baselines And Buy-And-Hold
 
+These classifier baselines must stay on the same `BEST_MANIFEST` as the selected CUSUM Conv1D and ResNet-LSTM runs.
+Compare them with classification metrics only. Buy-and-hold is an economic baseline on the same folds, not a macro-F1
+baseline.
+
 ```bash
 source artifacts/final_plan/selected_grid.env
 
@@ -186,6 +190,7 @@ uv run python scripts/simple_baselines.py \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-majority \
+  --seed 1337 \
   --output results/baselines/E0_majority.csv
 
 uv run python scripts/simple_baselines.py \
@@ -193,6 +198,7 @@ uv run python scripts/simple_baselines.py \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-random \
+  --seed 1337 \
   --output results/baselines/E0_random.csv
 
 uv run python scripts/simple_baselines.py \
@@ -200,6 +206,7 @@ uv run python scripts/simple_baselines.py \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-logreg \
+  --seed 1337 \
   --output results/baselines/E0_logreg.csv
 
 uv run python scripts/simple_baselines.py \
@@ -207,6 +214,7 @@ uv run python scripts/simple_baselines.py \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-random-forest \
+  --seed 1337 \
   --output results/baselines/E0_random_forest.csv
 
 uv run python scripts/buy_and_hold_baseline.py \
@@ -246,6 +254,8 @@ echo "$BEST_RESNET_RESULT"
 ```
 
 The printed CSV path should exist locally and must be shared for final aggregation.
+This ResNet-LSTM run is intended to be compared against the selected Conv1D CUSUM run and the scikit-learn baselines
+using classification metrics only, because they all use the same selected CUSUM manifest/config family.
 
 ### Person 4: ResNet-LSTM Confidence Sweep And Meta-Selection Sweep
 

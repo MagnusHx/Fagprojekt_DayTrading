@@ -375,12 +375,16 @@ reports/generated/figures/sample_count_comparison.pdf
 
 Run after `source artifacts/final_plan/selected_grid.env`.
 
+These baselines are meant to be directly comparable to the selected CUSUM Conv1D and ResNet-LSTM runs. Keep them on
+the same `BEST_MANIFEST`, use the same walk-forward folds, and compare them with classification metrics only.
+
 ```bash
 uv run python scripts/simple_baselines.py \
   --model majority \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-majority \
+  --seed 1337 \
   --output results/baselines/E0_majority.csv
 
 uv run python scripts/simple_baselines.py \
@@ -388,6 +392,7 @@ uv run python scripts/simple_baselines.py \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-random \
+  --seed 1337 \
   --output results/baselines/E0_random.csv
 
 uv run python scripts/simple_baselines.py \
@@ -395,6 +400,7 @@ uv run python scripts/simple_baselines.py \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-logreg \
+  --seed 1337 \
   --output results/baselines/E0_logreg.csv
 
 uv run python scripts/simple_baselines.py \
@@ -402,6 +408,7 @@ uv run python scripts/simple_baselines.py \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-random-forest \
+  --seed 1337 \
   --output results/baselines/E0_random_forest.csv
 ```
 
@@ -413,10 +420,14 @@ uv run python scripts/simple_baselines.py \
   --cv-manifest "$BEST_MANIFEST" \
   --wandb-project day-trading-experiments \
   --wandb-name E0-hist-gb \
+  --seed 1337 \
   --output results/baselines/E0_hist_gb.csv
 ```
 
 ## Step 12: Run Buy-And-Hold Baseline On The Selected Config
+
+This is an economic baseline on the same selected CUSUM folds, not a classifier baseline. Do not rank it against
+Conv1D, ResNet-LSTM, or the scikit-learn classifiers using macro F1.
 
 ```bash
 uv run python scripts/buy_and_hold_baseline.py \
@@ -430,6 +441,8 @@ uv run python scripts/buy_and_hold_baseline.py \
 ## Step 13: Train ResNet-LSTM On The Selected Config
 
 `Step 5` already wrote `reports/promising_grid_configs.json`, so this command uses the selected CUSUM/TB config.
+For a fair architecture comparison, keep this run no-meta and on the same selected manifest/config family as the
+baseline Conv1D and the scikit-learn baselines above.
 
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-resnet \
@@ -449,6 +462,8 @@ echo "$BEST_RESNET_RESULT"
 
 Run after `source artifacts/final_plan/selected_grid.env`.
 If the ResNet-LSTM run is no-meta, compare architecture quality using classification metrics only.
+The same rule applies when informally comparing ResNet-LSTM against the scikit-learn baselines: use macro F1,
+accuracy, confusion matrices, and class distributions on the same selected CUSUM manifest.
 
 ```bash
 uv run python scripts/compare_experiments.py \
