@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import csv
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -85,6 +87,8 @@ class EvalConfig:
     primary_confidence_threshold: float = 0.0
     kelly_fraction: float = 0.25
     kelly_payoff_ratio: float = 1.0
+    prediction_export_dir: Optional[Path] = None
+    prediction_export_prefix: str = "predictions"
 
 
 class ExperimentEvaluator:
@@ -138,6 +142,118 @@ class ExperimentEvaluator:
             barrier_height=float(self.cfg.backtest_barrier_height),
             transaction_cost=float(self.cfg.transaction_cost),
         )
+
+    def _prediction_export_path(self, split: str) -> Optional[Path]:
+        """Return the CSV path for per-sample prediction diagnostics."""
+        if self.cfg.prediction_export_dir is None:
+            return None
+        prefix = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in self.cfg.prediction_export_prefix)
+        split_slug = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in split)
+        return Path(self.cfg.prediction_export_dir) / f"{prefix}_{split_slug}_predictions.csv"
+
+    def _write_prediction_diagnostics(
+        self,
+        split: str,
+        pred_out: Dict[str, Any],
+        *,
+        take_proba: np.ndarray,
+        meta_true: np.ndarray,
+        meta_pred: np.ndarray,
+        event_true: np.ndarray,
+        y_trade: np.ndarray,
+        bet_size: np.ndarray,
+    ) -> None:
+        """Write one row per prediction for meta-selection scatter-plot diagnostics."""
+        path = self._prediction_export_path(split)
+        if path is None:
+            return
+
+        tid = np.asarray(pred_out["tid"], dtype=np.int64)
+        tpos = np.asarray(pred_out["tpos"], dtype=np.int64)
+        side_true = np.asarray(pred_out["y_true"], dtype=np.int64)
+        side_pred = np.asarray(pred_out["y_pred"], dtype=np.int64)
+        confidence = np.asarray(pred_out["y_pred_confidence"], dtype=np.float64)
+        proba = np.asarray(pred_out["y_pred_proba"], dtype=np.float64)
+        logits = np.asarray(pred_out["y_logits"], dtype=np.float64)
+        index = np.stack([tid, tpos], axis=1).astype(np.int64, copy=False)
+        metas = self.store.metadata_for_index(index)
+
+        class_count = int(max(proba.shape[1] if proba.ndim == 2 else 0, logits.shape[1] if logits.ndim == 2 else 0))
+        fieldnames = [
+            "split",
+            "tid",
+            "ticker",
+            "tpos",
+            "timestamp",
+            "bar_open_time",
+            "bar_close_time",
+            "side_true",
+            "side_pred",
+            "primary_confidence",
+        ]
+        fieldnames.extend(f"primary_proba_class_{i}" for i in range(class_count))
+        fieldnames.extend(f"primary_logit_class_{i}" for i in range(class_count))
+        fieldnames.extend(
+            [
+                "primary_logit_margin",
+                "primary_proba_margin",
+                "event_true",
+                "meta_true",
+                "meta_take_proba",
+                "meta_pred_take",
+                "trade_signal",
+                "bet_size",
+                "pnl_fraction",
+                "proposed_signed_return",
+                "executed_signed_return",
+            ]
+        )
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(len(tid)):
+                meta = metas[i] if i < len(metas) and isinstance(metas[i], dict) else {}
+                pnl_value = meta.get("pnl_fraction")
+                pnl_fraction = float(pnl_value) if isinstance(pnl_value, (int, float)) else float("nan")
+                proposed_signed_return = pnl_fraction if int(side_pred[i]) == 1 else -pnl_fraction
+                executed_signed_return = (
+                    proposed_signed_return if int(y_trade[i]) in ACTED_LABELS and float(bet_size[i]) > 0.0 else 0.0
+                )
+                row: Dict[str, Any] = {
+                    "split": split,
+                    "tid": int(tid[i]),
+                    "ticker": str(self.store.tickers_all[int(tid[i])]),
+                    "tpos": int(tpos[i]),
+                    "timestamp": str(meta.get("signal_time", "")),
+                    "bar_open_time": str(meta.get("bar_open_time", "")),
+                    "bar_close_time": str(meta.get("bar_close_time", "")),
+                    "side_true": int(side_true[i]),
+                    "side_pred": int(side_pred[i]),
+                    "primary_confidence": float(confidence[i]),
+                    "primary_logit_margin": float(logits[i, 1] - logits[i, 0]) if logits.shape[1] >= 2 else 0.0,
+                    "primary_proba_margin": float(proba[i, 1] - proba[i, 0]) if proba.shape[1] >= 2 else 0.0,
+                    "event_true": int(event_true[i]),
+                    "meta_true": int(meta_true[i]),
+                    "meta_take_proba": float(take_proba[i]),
+                    "meta_pred_take": int(meta_pred[i]),
+                    "trade_signal": int(y_trade[i]),
+                    "bet_size": float(bet_size[i]),
+                    "pnl_fraction": pnl_fraction,
+                    "proposed_signed_return": proposed_signed_return,
+                    "executed_signed_return": executed_signed_return,
+                }
+                for class_idx in range(class_count):
+                    row[f"primary_proba_class_{class_idx}"] = (
+                        float(proba[i, class_idx]) if proba.ndim == 2 and class_idx < proba.shape[1] else float("nan")
+                    )
+                    row[f"primary_logit_class_{class_idx}"] = (
+                        float(logits[i, class_idx])
+                        if logits.ndim == 2 and class_idx < logits.shape[1]
+                        else float("nan")
+                    )
+                writer.writerow(row)
 
     def _fit_meta_model(self, pred_out: Dict[str, Any]) -> LogisticMetaLabeler:
         started_at = time.time()
@@ -204,6 +320,18 @@ class ExperimentEvaluator:
             low_confidence_mask = confidence < float(self.cfg.primary_confidence_threshold)
             y_trade[low_confidence_mask] = LABEL_EXIT
             bet_size[low_confidence_mask] = 0.0
+
+        if detailed:
+            self._write_prediction_diagnostics(
+                split,
+                pred_out,
+                take_proba=take_proba,
+                meta_true=meta_true,
+                meta_pred=meta_pred,
+                event_true=event_true,
+                y_trade=y_trade,
+                bet_size=bet_size,
+            )
 
         acted_mask = np.isin(y_trade, ACTED_LABELS) & (bet_size > 0.0)
         actionable_truth_mask = np.isin(event_true, ACTED_LABELS)

@@ -515,6 +515,13 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid
   --extra-train-arg 1337
 ```
 
+For per-sample meta-selection diagnostics used to inspect logits, TAKE probabilities, trade decisions, and outliers, add:
+
+```bash
+  --extra-train-arg=--prediction-export-dir \
+  --extra-train-arg artifacts/prediction_diagnostics
+```
+
 Expected outputs match:
 
 ```bash

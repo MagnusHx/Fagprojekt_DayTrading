@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -219,6 +220,80 @@ def test_evaluator_confusion_matrix_stays_binary_while_backtest_uses_event_label
     assert cm.shape == (2, 2)
     assert isinstance(rows, list)
     assert profit_curve is not None
+
+
+def test_evaluator_exports_per_sample_prediction_diagnostics(tmp_path: Path) -> None:
+    dataset = _PredictionDataset(y_true=[0, 1, 1], tids=[0, 0, 0], tpos=[0, 1, 2])
+    loader = DataLoader(dataset, batch_size=3, shuffle=False)
+    model = _IndexLogitModel(
+        logits=[
+            [3.0, 0.1],
+            [0.1, 3.0],
+            [1.0, 2.0],
+        ]
+    )
+    store = _FakeStore(
+        tickers_all=["AAA"],
+        metadata={
+            (0, 0): {
+                "label": 0,
+                "bar_open_time": "2024-01-01T00:00:00+00:00",
+                "bar_close_time": "2024-01-02T00:00:00+00:00",
+                "pnl_fraction": 0.05,
+            },
+            (0, 1): {
+                "label": 2,
+                "bar_open_time": "2024-01-02T00:00:00+00:00",
+                "bar_close_time": "2024-01-03T00:00:00+00:00",
+                "pnl_fraction": 0.05,
+            },
+            (0, 2): {
+                "label": 0,
+                "bar_open_time": "2024-01-03T00:00:00+00:00",
+                "bar_close_time": "2024-01-04T00:00:00+00:00",
+                "pnl_fraction": -0.02,
+            },
+        },
+        market_data={
+            0: _market_data_from_times(
+                ["2024-01-01T00:00:00", "2024-01-02T00:00:00", "2024-01-03T00:00:00"],
+                opens=[100.0, 100.0, 100.0],
+                highs=[100.0, 106.0, 100.0],
+                lows=[94.0, 100.0, 97.0],
+                closes=[95.0, 105.0, 98.0],
+            )
+        },
+    )
+    evaluator = ExperimentEvaluator(
+        store=store,
+        device=torch.device("cpu"),
+        cfg=EvalConfig(
+            compute_profit_stats=False,
+            compute_paper_trading_metrics=False,
+            compute_portfolio_metrics=False,
+            meta_features=("proba", "logits"),
+            meta_accept_threshold=0.5,
+            prediction_export_dir=tmp_path,
+            prediction_export_prefix="fold00",
+        ),
+    )
+
+    evaluator.evaluate_split("test", model, loader, step=1)
+
+    path = tmp_path / "fold00_test_predictions.csv"
+    rows = list(csv.DictReader(path.open(newline="", encoding="utf-8")))
+    assert len(rows) == 3
+    assert {
+        "primary_logit_class_0",
+        "primary_logit_class_1",
+        "primary_logit_margin",
+        "meta_take_proba",
+        "meta_pred_take",
+        "trade_signal",
+        "pnl_fraction",
+        "proposed_signed_return",
+        "executed_signed_return",
+    }.issubset(rows[0])
 
 
 class _FakeConfig(dict):

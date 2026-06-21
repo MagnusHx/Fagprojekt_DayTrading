@@ -401,6 +401,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional CSV path for per-fold CV results. Defaults to results/<wandb-name>.csv for CV runs.",
     )
     p.add_argument(
+        "--prediction-export-dir",
+        type=Path,
+        default=None,
+        help="Optional directory for per-sample prediction diagnostics CSVs from detailed validation/test evaluation.",
+    )
+    p.add_argument(
         "--no-save-best-checkpoint",
         action="store_true",
         help="Disable writing a local best-checkpoint bundle for offline metric reconciliation.",
@@ -873,6 +879,8 @@ def run_single_fold(
                 backtest_width_minutes=int(labeler_cfg.get("width_minutes", 0)),
                 backtest_barrier_height=float(labeler_cfg.get("height", 0.0)),
                 labels=(0, 1),
+                prediction_export_dir=args.prediction_export_dir,
+                prediction_export_prefix=f"{args.wandb_name}-{fold_tag or 'single'}",
             ),
         )
 
