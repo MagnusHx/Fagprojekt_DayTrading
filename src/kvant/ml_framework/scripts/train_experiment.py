@@ -411,6 +411,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable writing a local best-checkpoint bundle for offline metric reconciliation.",
     )
+    p.add_argument(
+        "--init-checkpoint-dir",
+        type=Path,
+        default=None,
+        help="Directory holding best-checkpoint bundles to reuse as the primary model "
+        "(per-fold files written by an earlier run). Required when --skip-primary-training is set.",
+    )
+    p.add_argument(
+        "--skip-primary-training",
+        action="store_true",
+        help="Skip primary-model training and load weights from --init-checkpoint-dir instead. "
+        "Only the meta-selection layer is re-fit and evaluated. Use to sweep meta thresholds on a fixed model.",
+    )
     args = p.parse_args()
     args = _apply_baseline_preset(args)
     if args.exp_dir is None and args.cv_manifest is None:
@@ -457,6 +470,8 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("--min-lr must be less than or equal to --lr.")
     if args.early_stopping_patience == 0:
         args.early_stopping_patience = None
+    if args.skip_primary_training and args.init_checkpoint_dir is None:
+        raise SystemExit("--skip-primary-training requires --init-checkpoint-dir.")
     return args
 
 
@@ -549,6 +564,33 @@ def _save_best_checkpoint_bundle(
     torch.save(bundle, bundle_path)
     print(f"Saved best-checkpoint bundle to {bundle_path}")
     return bundle_path
+
+
+def _resolve_init_checkpoint(init_dir: Path, fold_tag: str | None) -> Path:
+    """Locate the best-checkpoint bundle to reuse for this fold inside ``init_dir``.
+
+    Bundles are written as ``<wandb-name>[-<fold_tag>]-best.ckpt.pt``. The reusing run has a
+    different ``wandb-name`` than the run that trained the model, so we match on the fold suffix
+    rather than the full stem and expect the directory to hold a single matching bundle.
+    """
+    init_dir = Path(init_dir)
+    if not init_dir.exists():
+        raise SystemExit(f"--init-checkpoint-dir {init_dir} does not exist.")
+    if fold_tag:
+        matches = sorted(init_dir.glob(f"*-{fold_tag}-best.ckpt.pt"))
+    else:
+        matches = [p for p in sorted(init_dir.glob("*-best.ckpt.pt")) if "-fold" not in p.name]
+    if not matches:
+        raise SystemExit(
+            f"No best-checkpoint bundle for fold_tag={fold_tag!r} found in {init_dir}. "
+            "Run the model-training threshold first so its checkpoints exist."
+        )
+    if len(matches) > 1:
+        raise SystemExit(
+            f"Expected exactly one best-checkpoint bundle for fold_tag={fold_tag!r} in {init_dir}, "
+            f"found {len(matches)}: {[p.name for p in matches]}."
+        )
+    return matches[0]
 
 
 def _make_logger(
@@ -906,37 +948,55 @@ def run_single_fold(
             early_stopping_min_delta=float(args.early_stopping_min_delta),
         )
 
-        out = trainer.fit(
-            train_loader=dl_train,
-            train_eval_loader=dl_train_eval,
-            val_loader=dl_val,
-            test_loader=dl_test,
-            cfg=cfg,
-        )
+        if args.skip_primary_training:
+            ckpt_path = _resolve_init_checkpoint(Path(args.init_checkpoint_dir), fold_tag)
+            bundle = torch.load(ckpt_path, map_location=device)
+            model.load_state_dict(bundle["model_state"])
+            print(
+                f"Loaded primary model from {ckpt_path}; skipping training and only re-fitting "
+                f"the meta-selection layer at threshold {float(args.meta_accept_threshold):g}.",
+                flush=True,
+            )
+            best_metric = float(bundle.get("best_metric", 0.0))
+            eval_step = 1
+        else:
+            out = trainer.fit(
+                train_loader=dl_train,
+                train_eval_loader=dl_train_eval,
+                val_loader=dl_val,
+                test_loader=dl_test,
+                cfg=cfg,
+            )
 
-        if out["best_state"] is not None:
-            model.load_state_dict(out["best_state"])
-        _save_best_checkpoint_bundle(
-            args=args,
-            exp_dir=exp_dir,
-            fold_tag=fold_tag,
-            best_state=out["best_state"],
-            best_metric=float(out["best_metric"]),
-            exp=exp,
-            labeler_cfg=labeler_cfg,
-        )
+            if out["best_state"] is not None:
+                model.load_state_dict(out["best_state"])
+            _save_best_checkpoint_bundle(
+                args=args,
+                exp_dir=exp_dir,
+                fold_tag=fold_tag,
+                best_state=out["best_state"],
+                best_metric=float(out["best_metric"]),
+                exp=exp,
+                labeler_cfg=labeler_cfg,
+            )
+            best_metric = float(out["best_metric"])
+            eval_step = int(out["epochs_ran"]) + 1
 
         best_metrics = evaluator.evaluate_all(
             model,
             {"train": dl_train_eval, "val": dl_val, "test": dl_test},
-            step=int(out["epochs_ran"]) + 1,
+            step=eval_step,
             metric_splits=("val", "test"),
             detailed=True,
         )
-        logger.child(namespace="best").log(best_metrics, step=int(out["epochs_ran"]) + 1)
+        logger.child(namespace="best").log(best_metrics, step=eval_step)
         fold_idx = int(str(fold_tag).removeprefix("fold")) if fold_tag is not None else 0
+        if args.skip_primary_training:
+            # The reused bundle's best_metric reflects the model-training threshold; report the
+            # meta F1 recomputed at this run's threshold instead so the CV summary stays meaningful.
+            best_metric = float(best_metrics.get("val/meta/f1", best_metric))
         return {
-            "best_metric": float(out["best_metric"]),
+            "best_metric": best_metric,
             "result_row": _fold_result_row(fold_idx, best_metrics),
         }
     finally:

@@ -507,6 +507,13 @@ This tests RQ4 on the selected CUSUM/TB setup using the ResNet-LSTM architecture
 meta-model improves TAKE/PASS selection. For meta-selection, report take rate, meta F1, acted directional accuracy,
 executed trade count, and portfolio metrics.
 
+The meta-accept threshold is an evaluation-time cutoff: it does not change primary-model training or the fitted
+meta-labeler. So the sweep trains the primary ResNet-LSTM **once per config** (on the first threshold) and reuses that
+fixed model for the remaining thresholds. The first threshold writes its best-checkpoint bundles to its
+`--checkpoint-out-dir`; the later thresholds load them via `--init-checkpoint-dir` and `--skip-primary-training`, then
+only re-fit the meta-selection layer and evaluate at their own threshold. This keeps every threshold on an identical
+primary network and cuts training cost roughly fourfold.
+
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-meta \
   --execute \
@@ -521,6 +528,10 @@ For per-sample meta-selection diagnostics used to inspect logits, TAKE probabili
   --extra-train-arg=--prediction-export-dir \
   --extra-train-arg artifacts/prediction_diagnostics
 ```
+
+Each threshold still produces its own W&B run, result CSV, and diagnostics. Because the reuse runs depend on the
+training run that precedes them, keep a config's commands together: when splitting across machines with `--start-index`
+and `--max-runs`, do not cut between a config's first (training) threshold and its later (reuse) thresholds.
 
 Expected outputs match:
 
