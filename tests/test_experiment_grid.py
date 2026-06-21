@@ -5,6 +5,7 @@ from kvant.ml_framework.scripts.run_experiment_grid import (
     GridRun,
     iter_grid_configs,
     prepare_command,
+    threshold_sweep_runs,
     train_command,
 )
 
@@ -112,9 +113,7 @@ def test_train_command_builds_resnet_confidence_run() -> None:
     assert "--no-meta" in cmd
     assert "--primary-confidence-threshold" in cmd
     assert cmd[cmd.index("--primary-confidence-threshold") + 1] == "0.55"
-    assert Path(cmd[cmd.index("--results-out") + 1]).name == (
-        "E2-grid-resnet_lstm-w240-tb2-cusum1-nometa-ct0p55.csv"
-    )
+    assert Path(cmd[cmd.index("--results-out") + 1]).name == ("E2-grid-resnet_lstm-w240-tb2-cusum1-nometa-ct0p55.csv")
 
 
 def test_train_command_builds_resnet_meta_run() -> None:
@@ -136,3 +135,38 @@ def test_train_command_builds_resnet_meta_run() -> None:
     assert "--meta-accept-threshold" in cmd
     assert cmd[cmd.index("--meta-accept-threshold") + 1] == "0.6"
     assert Path(cmd[cmd.index("--results-out") + 1]).name == "E2-grid-resnet_lstm-w240-tb2-cusum1-mt0p6.csv"
+
+
+def test_confidence_sweep_trains_once_and_reuses_its_checkpoint() -> None:
+    """Only the first confidence threshold should train the primary model."""
+    config = GridConfig(cusum_h=0.01, barrier_height=0.02, barrier_width=240)
+
+    runs = threshold_sweep_runs(config, mode="confidence")
+
+    assert [run.primary_confidence_threshold for run in runs] == [0.45, 0.5, 0.55, 0.6]
+    assert runs[0].skip_primary_training is False
+    assert runs[0].init_checkpoint_dir is None
+    assert all(run.skip_primary_training for run in runs[1:])
+    assert all(run.init_checkpoint_dir == runs[0].checkpoint_dir for run in runs[1:])
+
+    reuse_command = train_command(
+        runs[1],
+        epochs=30,
+        transaction_cost=0.0,
+        wandb_project="day-trading-experiments",
+        wandb_entity="team-entity",
+    )
+    assert "--skip-primary-training" in reuse_command
+    assert reuse_command[reuse_command.index("--init-checkpoint-dir") + 1] == str(runs[0].checkpoint_dir)
+
+
+def test_meta_sweep_uses_the_same_checkpoint_reuse_pattern() -> None:
+    """Meta threshold commands should implement their documented checkpoint reuse."""
+    config = GridConfig(cusum_h=0.01, barrier_height=0.02, barrier_width=240)
+
+    runs = threshold_sweep_runs(config, mode="meta")
+
+    assert [run.meta_threshold for run in runs] == [0.45, 0.5, 0.55, 0.6]
+    assert runs[0].skip_primary_training is False
+    assert all(run.skip_primary_training for run in runs[1:])
+    assert all(run.init_checkpoint_dir == runs[0].checkpoint_dir for run in runs[1:])

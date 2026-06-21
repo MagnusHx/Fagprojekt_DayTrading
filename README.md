@@ -487,6 +487,11 @@ uv run python scripts/compare_experiments.py \
 This tests RQ3 on the selected CUSUM/TB setup using the ResNet-LSTM architecture from Step 13. These runs introduce a
 decision threshold, so they can use decision and portfolio metrics in addition to classification metrics.
 
+The confidence threshold is applied only when primary predictions are converted into trade decisions. The sweep
+therefore trains the primary ResNet-LSTM once per config at the first threshold and reuses that checkpoint for the
+remaining thresholds with `--init-checkpoint-dir` and `--skip-primary-training`. Every threshold retains its own W&B
+run, result CSV, and diagnostics while using identical primary-model weights.
+
 ```bash
 caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-confidence \
   --execute \
@@ -500,6 +505,9 @@ Expected outputs match:
 ```bash
 ls $BEST_CONFIDENCE_GLOB
 ```
+
+Keep all four thresholds for a config together when splitting commands with `--start-index` and `--max-runs`; the
+three reuse runs depend on the checkpoint produced by the first run.
 
 ## Step 16: Run Meta-Selection Sweep
 

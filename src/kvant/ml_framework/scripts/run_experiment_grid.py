@@ -48,6 +48,8 @@ class GridRun:
     meta_threshold: float | None = None
     no_meta: bool = True
     primary_confidence_threshold: float = 0.0
+    init_checkpoint_dir: Path | None = None
+    skip_primary_training: bool = False
 
     @property
     def run_name(self) -> str:
@@ -164,8 +166,41 @@ def train_command(
         cmd.append("--no-meta")
     if float(run.primary_confidence_threshold) > 0.0:
         cmd.extend(["--primary-confidence-threshold", f"{float(run.primary_confidence_threshold):g}"])
+    if run.skip_primary_training:
+        if run.init_checkpoint_dir is None:
+            raise ValueError("A skipped primary-training run requires init_checkpoint_dir.")
+        cmd.extend(["--init-checkpoint-dir", str(run.init_checkpoint_dir), "--skip-primary-training"])
     cmd.extend(extra_args)
     return cmd
+
+
+def threshold_sweep_runs(config: GridConfig, *, mode: Literal["confidence", "meta"]) -> list[GridRun]:
+    """Build one training run followed by checkpoint-reusing threshold runs."""
+    runs: list[GridRun] = []
+    training_checkpoint_dir: Path | None = None
+    for threshold_index, threshold in enumerate(DECISION_THRESHOLDS):
+        if mode == "confidence":
+            run = GridRun(
+                config=config,
+                model="resnet_lstm",
+                no_meta=True,
+                primary_confidence_threshold=threshold,
+                init_checkpoint_dir=training_checkpoint_dir,
+                skip_primary_training=threshold_index > 0,
+            )
+        else:
+            run = GridRun(
+                config=config,
+                model="resnet_lstm",
+                no_meta=False,
+                meta_threshold=threshold,
+                init_checkpoint_dir=training_checkpoint_dir,
+                skip_primary_training=threshold_index > 0,
+            )
+        runs.append(run)
+        if threshold_index == 0:
+            training_checkpoint_dir = run.checkpoint_dir
+    return runs
 
 
 def load_promising_configs(path: Path) -> list[GridConfig]:
@@ -318,12 +353,7 @@ def main() -> None:
         configs = load_promising_configs(args.promising_configs)
         commands = [
             train_command(
-                GridRun(
-                    config=config,
-                    model="resnet_lstm",
-                    no_meta=True,
-                    primary_confidence_threshold=threshold,
-                ),
+                run,
                 epochs=args.resnet_epochs,
                 transaction_cost=args.transaction_cost,
                 wandb_project=args.wandb_project,
@@ -331,13 +361,13 @@ def main() -> None:
                 extra_args=extra_train_args,
             )
             for config in configs
-            for threshold in DECISION_THRESHOLDS
+            for run in threshold_sweep_runs(config, mode="confidence")
         ]
     else:
         configs = load_promising_configs(args.promising_configs)
         commands = [
             train_command(
-                GridRun(config=config, model="resnet_lstm", no_meta=False, meta_threshold=threshold),
+                run,
                 epochs=args.resnet_epochs,
                 transaction_cost=args.transaction_cost,
                 wandb_project=args.wandb_project,
@@ -345,7 +375,7 @@ def main() -> None:
                 extra_args=extra_train_args,
             )
             for config in configs
-            for threshold in DECISION_THRESHOLDS
+            for run in threshold_sweep_runs(config, mode="meta")
         ]
 
     selected = _selected(commands, start_index=args.start_index, max_runs=args.max_runs)
