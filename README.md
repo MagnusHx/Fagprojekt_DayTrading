@@ -1,4 +1,4 @@
-# Day Trading as a Multi-Level Decision Problem
+# Day-Trading as a Multilevel Decision Problem
 
 This README is the reproducibility runbook. Run the commands in order from the repository root. The intended outcome is:
 
@@ -13,16 +13,69 @@ This README is the reproducibility runbook. Run the commands in order from the r
 The project is reference-inspired, not a direct reproduction of the crypto paper. We test whether the general pipeline
 transfers to intraday U.S. equities.
 
+## Fresh Clone Quick Start
+
+Use this section if you have not worked in the repository before.
+
+1. Clone the repository and enter the project root:
+
+```bash
+git clone https://github.com/MagnusHx/Fagprojekt_DayTrading.git
+cd Fagprojekt_DayTrading
+```
+
+2. Install `uv` if it is not already available:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Restart the terminal after installing `uv` if the command is still not found.
+
+3. Install the project environment:
+
+```bash
+uv sync
+```
+
+4. Configure W&B. All group members must use the same project and entity:
+
+```bash
+export WANDB_PROJECT=day-trading-experiments
+export WANDB_ENTITY=s245509-danmarks-tekniske-universitet-dtu
+wandb login
+```
+
+5. Configure Hugging Face access if downloads are rate-limited or require authentication:
+
+```bash
+export HF_TOKEN=<your-hugging-face-token>
+```
+
+`HUGGINGFACE_HUB_TOKEN` also works. The data loader reads either variable.
+
+6. Run every command below from the repository root. After Step 5, run `source artifacts/final_plan/selected_grid.env`
+again in every new terminal before using variables such as `$BEST_MANIFEST`, `$BEST_GRID_RESULT`,
+`$BEST_RESNET_RESULT`, `$BEST_CONFIDENCE_GLOB`, or `$BEST_META_GLOB`.
+
 ## Research Questions
 
-1. Is it possible to translate the methods and pipeline used in the paper *Algorithmic crypto trading using
-   information-driven bars, triple barrier labeling and deep learning* to a set of financial instruments, i.e. intraday
-   U.S. equities?
-2. Does a CUSUM-based event sampling and triple-barrier labeling framework improve predictive and economic performance
-   over a non-information-driven intraday stock trading baseline?
-3. Does selective trading, where trades are only executed when the primary model's prediction confidence is sufficiently
-   high, improve risk-adjusted returns?
-4. Can a learned meta-labeling model improve trade selection beyond the primary model's own confidence?
+1. Is it possible to translate the methods and pipeline used in the paper
+   "Algorithmic crypto trading using information-driven bars, triple barrier
+   labeling and deep learning" to a set of financial instruments, i.e.
+   intraday U.S. equities?
+
+2. Does a CUSUM-based event sampling and triple-barrier labeling framework
+   improve predictive performance over a non-information-driven intraday
+   stock trading baseline?
+
+3. Do more complex models improve performance compared to baseline models?
+
+4. Does confidence-based selective trading improve gross risk-adjusted
+   backtest diagnostics?
+
+5. Can a learned meta-labeling model improve trade selection beyond the
+   primary model's own confidence?
 
 ## Fixed Configuration
 
@@ -47,6 +100,7 @@ transfers to intraday U.S. equities.
 results/baselines/             simple baselines and buy-and-hold
 results/grid_search/           CUSUM/TB grid, ResNet, confidence, and meta sweeps
 results/main/                  timebar and density-matched timebar controls
+results/prediction_diagnostics/ per-sample prediction CSVs and meta diagnostic plots
 reports/generated/tables/      CSV and LaTeX tables
 reports/generated/figures/     PNG and PDF figures
 artifacts/final_plan/          generated command plans and selected config files
@@ -55,13 +109,15 @@ artifacts/                     checkpoints
 
 ## Step 0: Install And Smoke Check
 
+If you already ran the fresh-clone setup above, `uv sync` can be skipped.
+
 ```bash
 uv sync
 uv run python -m pytest tests/test_experiment_grid.py
 uv run ruff check .
 ```
 
-On macOS, long training commands use `caffeinate -dims` so the machine does not sleep.
+On macOS, you can optionally prefix long training commands with `caffeinate -dims` to prevent sleep. The commands below omit it so they work on macOS, Linux, and HPC.
 
 ## Step 0b: Lock W&B Project For Everyone
 
@@ -70,6 +126,7 @@ Every group member must use the same W&B project and entity before running exper
 ```bash
 export WANDB_PROJECT=day-trading-experiments
 export WANDB_ENTITY=s245509-danmarks-tekniske-universitet-dtu
+wandb login
 ```
 
 Optional local `.env` setup:
@@ -80,6 +137,12 @@ cp .env.example .env
 
 Do not change these values between runs. All experiment scripts use these values by default, and grid-generated training
 commands pass the same project/entity through to `train_experiment`.
+
+If Hugging Face returns rate-limit or authentication errors while preparing data, set:
+
+```bash
+export HF_TOKEN=<your-hugging-face-token>
+```
 
 ## Step 1: Prepare The 15-Minute Time-Bar Baseline
 
@@ -134,7 +197,7 @@ src/kvant/ml_framework/prepared/sb_L_12_w240_h6_fixedCUSUM0.03_cv_manifest.json
 ## Step 3: Train The 15-Minute Time-Bar Conv1D Baseline
 
 ```bash
-caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
+uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E1_timebar_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
   --checkpoint-out-dir artifacts/E1_timebar_conv1d_nometa \
@@ -187,7 +250,7 @@ uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d \
 Then execute the full grid:
 
 ```bash
-caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d \
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d \
   --execute \
   --wandb-project day-trading-experiments \
   --extra-train-arg=--seed \
@@ -208,7 +271,7 @@ results/grid_search/E2-grid-conv1d-w240-tb6-cusum3-nometa.csv
 To split the grid across machines, use the same command with different `--start-index` and `--max-runs`. Example:
 
 ```bash
-caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d \
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-conv1d \
   --execute \
   --start-index 0 \
   --max-runs 4 \
@@ -221,6 +284,9 @@ caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid
 
 This uses validation metrics only. For the no-meta CUSUM/TB grid, select by predictive quality, not portfolio outcome.
 The default primary selection metric is `val_f1_macro`, with `val_accuracy` as the default tie-breaker.
+
+This step creates the environment variables used by later commands. If you open a new terminal after this step, run the
+`source` command again before continuing.
 
 ```bash
 uv run python scripts/select_best_grid_config.py \
@@ -332,7 +398,7 @@ src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.j
 ## Step 9: Train Density-Matched Time-Bar Control
 
 ```bash
-caffeinate -dims uv run python -m kvant.ml_framework.scripts.train_experiment \
+uv run python -m kvant.ml_framework.scripts.train_experiment \
   --cv-manifest src/kvant/ml_framework/prepared/E2_timebar_density_matched_nextbar_cv_manifest.json \
   --model conv1d --epochs 20 --seed 1337 \
   --checkpoint-out-dir artifacts/E2_timebar_density_matched_nextbar \
@@ -444,8 +510,10 @@ uv run python scripts/buy_and_hold_baseline.py \
 For a fair architecture comparison, keep this run no-meta and on the same selected manifest/config family as the
 baseline Conv1D and the scikit-learn baselines above.
 
+Run `source artifacts/final_plan/selected_grid.env` first if this is a new terminal.
+
 ```bash
-caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-resnet \
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-resnet \
   --execute \
   --wandb-project day-trading-experiments \
   --extra-train-arg=--seed \
@@ -487,13 +555,15 @@ uv run python scripts/compare_experiments.py \
 This tests RQ3 on the selected CUSUM/TB setup using the ResNet-LSTM architecture from Step 13. These runs introduce a
 decision threshold, so they can use decision and portfolio metrics in addition to classification metrics.
 
-The confidence threshold is applied only when primary predictions are converted into trade decisions. The sweep
-therefore trains the primary ResNet-LSTM once per config at the first threshold and reuses that checkpoint for the
-remaining thresholds with `--init-checkpoint-dir` and `--skip-primary-training`. Every threshold retains its own W&B
-run, result CSV, and diagnostics while using identical primary-model weights.
+Run `source artifacts/final_plan/selected_grid.env` first if this is a new terminal.
+
+The confidence threshold is a decision-time cutoff applied after the primary model has produced class probabilities.
+The sweep therefore trains the primary ResNet-LSTM once per config at the first threshold and reuses that checkpoint
+for the remaining thresholds with `--init-checkpoint-dir` and `--skip-primary-training`. Every threshold retains its
+own W&B run and result CSV while using identical primary-model weights.
 
 ```bash
-caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-confidence \
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-confidence \
   --execute \
   --wandb-project day-trading-experiments \
   --extra-train-arg=--seed \
@@ -515,15 +585,17 @@ This tests RQ4 on the selected CUSUM/TB setup using the ResNet-LSTM architecture
 meta-model improves TAKE/PASS selection. For meta-selection, report take rate, meta F1, acted directional accuracy,
 executed trade count, and portfolio metrics.
 
-The meta-accept threshold is an evaluation-time cutoff: it does not change primary-model training or the fitted
-meta-labeler. So the sweep trains the primary ResNet-LSTM **once per config** (on the first threshold) and reuses that
-fixed model for the remaining thresholds. The first threshold writes its best-checkpoint bundles to its
-`--checkpoint-out-dir`; the later thresholds load them via `--init-checkpoint-dir` and `--skip-primary-training`, then
-only re-fit the meta-selection layer and evaluate at their own threshold. This keeps every threshold on an identical
-primary network and cuts training cost roughly fourfold.
+Run `source artifacts/final_plan/selected_grid.env` first if this is a new terminal.
+
+The meta-accept threshold is a decision-time cutoff applied to the meta model's TAKE probability. The sweep trains the
+primary ResNet-LSTM **once per config** at the first threshold and reuses that fixed primary model for the remaining
+thresholds. The first threshold writes its best-checkpoint bundles to its `--checkpoint-out-dir`; the later thresholds
+load them via `--init-checkpoint-dir` and `--skip-primary-training`, then re-fit the meta-selection layer on the same
+train-fold predictions and evaluate at their own threshold. This keeps every threshold on an identical primary network
+and cuts training cost roughly fourfold.
 
 ```bash
-caffeinate -dims uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-meta \
+uv run python -m kvant.ml_framework.scripts.run_experiment_grid train-meta \
   --execute \
   --wandb-project day-trading-experiments \
   --extra-train-arg=--seed \
@@ -534,7 +606,7 @@ For per-sample meta-selection diagnostics used to inspect logits, TAKE probabili
 
 ```bash
   --extra-train-arg=--prediction-export-dir \
-  --extra-train-arg artifacts/prediction_diagnostics
+  --extra-train-arg results/prediction_diagnostics
 ```
 
 Each threshold still produces its own W&B run, result CSV, and diagnostics. Because the reuse runs depend on the
@@ -547,10 +619,37 @@ Expected outputs match:
 ls $BEST_META_GLOB
 ```
 
+Generate the meta-selection diagnostic plots after the prediction CSVs exist:
+
+```bash
+uv run python scripts/plot_prediction_diagnostics.py \
+  --input-dir results/prediction_diagnostics \
+  --output-dir results/prediction_diagnostics/plots \
+  --split val
+
+uv run python scripts/plot_prediction_diagnostics.py \
+  --input-dir results/prediction_diagnostics \
+  --output-dir results/prediction_diagnostics/plots \
+  --split test
+```
+
+Expected outputs:
+
+```text
+results/prediction_diagnostics/plots/val_logit_margin_vs_meta_take_proba.png
+results/prediction_diagnostics/plots/val_meta_take_proba_vs_realized_return.png
+results/prediction_diagnostics/plots/val_outlier_overlay.png
+results/prediction_diagnostics/plots/test_logit_margin_vs_meta_take_proba.png
+results/prediction_diagnostics/plots/test_meta_take_proba_vs_realized_return.png
+results/prediction_diagnostics/plots/test_outlier_overlay.png
+```
+
 ## Step 17: Generate Final Tables And Figures
 
 Run after all required experiments are complete. If optional `hist_gb`, ResNet, confidence, or meta runs were skipped,
 remove those corresponding lines.
+
+Run `source artifacts/final_plan/selected_grid.env` first if this is a new terminal.
 
 ```bash
 uv run python scripts/generate_experiment_report.py \
